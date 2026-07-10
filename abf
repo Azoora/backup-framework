@@ -83,7 +83,7 @@ EOF
 
 _abf_cmd_backup() {
     local service_name="$1"
-    local log_dir="${ABF_LOG_DIR:-/var/log/abf}"
+    local log_dir="${ABF_LOG_DIR:-}"
 
     abf_init_logging "$service_name" "backup" "$log_dir"
     abf_log_info "=== Backup Framework v${ABF_VERSION} ==="
@@ -106,7 +106,7 @@ _abf_cmd_restore() {
     local service_name="$1"
     local snapshot="${2:-}"
     local dry_run="${3:-false}"
-    local log_dir="${ABF_LOG_DIR:-/var/log/abf}"
+    local log_dir="${ABF_LOG_DIR:-}"
 
     abf_init_logging "$service_name" "restore" "$log_dir"
     abf_log_info "=== Backup Framework v${ABF_VERSION} ==="

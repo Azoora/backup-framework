@@ -20,7 +20,7 @@ ABF_LOG_JSON_FILE=""
 abf_init_logging() {
     local service="$1"
     local operation="$2"
-    local log_dir="${3:-/var/log/abf}"
+    local log_dir="${3:-${ABF_LOG_DIR:-}}"
     local timestamp
     timestamp=$(date -u +"%Y%m%d-%H%M%S")
 

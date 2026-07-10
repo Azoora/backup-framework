@@ -14,6 +14,23 @@
 - `abf doctor`: new checks (sqlite3, rclone configuration), improved [PASS]/[WARN]/[FAIL] output format
 - 6 new automated tests (62 total)
 
+### Bug Fixes (Production Deployment)
+
+- **Bug 1 — Hardcoded log path**: Removed all `/var/log/abf` fallback defaults from `core/log.sh:23` and
+  `abf:86,109`. Log path is now sourced exclusively from `ABF_LOG_DIR` config variable. If unset,
+  `abf_init_logging` falls back to empty string. Config validation catches missing `ABF_LOG_DIR`.
+- **Bug 2 — Hardcoded backup path**: Changed `services/vaultwarden/service.conf:8` default from
+  `/var/backups/abf/vaultwarden` to `/tmp/abf/vaultwarden`. Added `|| true` guard on `mkdir -p`
+  in `service_pre_backup` so `set -u` does not crash on failure.
+- **Bug 3 — Unbound variable + lock leak**: The EXIT trap already used the global `$ABF_LOCK_SERVICE`
+  instead of the local `$service_name`, but `abf_run_backup` never explicitly released the lock on
+  success or early-return paths — only the EXIT trap released it. Added explicit `abf_lock_release`
+  to every `return` path (both error and success), with the EXIT trap retained as a safety net.
+- **Test suite gap**: Added `test_integration.sh` with 5 end-to-end tests that run `./abf backup
+  vaultwarden` via the real CLI against a temp config/environment. Tests verify no `unbound variable`
+  crashes and that lock files are cleaned up post-backup.
+- 24 new automated tests (86 total)
+
 ## 0.1.0-beta (2026-07-10)
 
 ### Milestone 2 — Restic, Notifications, Retention, Scheduling

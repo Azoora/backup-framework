@@ -146,9 +146,14 @@ abf_run_backup() {
     abf_lock_init
     abf_lock_acquire "$service_name" || return "$ABF_EXIT_LOCK_ERROR"
     ABF_LOCK_SERVICE="$service_name"
+
+    # Safety net: release lock on unexpected script exit
     trap 'abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""; trap - EXIT' EXIT
 
-    abf_load_service_module "$service_name" || return "$ABF_EXIT_SERVICE_NOT_FOUND"
+    abf_load_service_module "$service_name" || {
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
+        return "$ABF_EXIT_SERVICE_NOT_FOUND"
+    }
     abf_load_service_config "$service_name"
     _abf_call_optional service_healthcheck "backup"
 
@@ -158,6 +163,7 @@ abf_run_backup() {
         service_post_backup
         _abf_call_optional service_cleanup "backup"
         _abf_notify_result "$rc" "$service_name"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
         return "$rc"
     }
     ABF_STAGING_DIR="${ABF_VW_TEMP_DIR:-}"
@@ -169,6 +175,7 @@ abf_run_backup() {
         service_post_backup
         _abf_call_optional service_cleanup "backup"
         _abf_notify_result "$rc" "$service_name"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
         return "$rc"
     }
 
@@ -178,6 +185,7 @@ abf_run_backup() {
         service_post_backup
         _abf_call_optional service_cleanup "backup"
         _abf_notify_result "$rc" "$service_name"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
         return "$rc"
     }
 
@@ -205,8 +213,8 @@ abf_run_backup() {
         abf_log_success "Backup completed for service: ${service_name}"
     fi
 
-    # Clean up trap to avoid referencing local variables on script exit
     trap - EXIT
+    abf_lock_release "$ABF_LOCK_SERVICE"
     ABF_LOCK_SERVICE=""
     return "$rc"
 }

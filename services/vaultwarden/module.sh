@@ -21,7 +21,7 @@ service_pre_backup() {
         return 1
     fi
 
-    mkdir -p "${SERVICE_VAULTWARDEN_BACKUP_DIR}"
+    mkdir -p "${SERVICE_VAULTWARDEN_BACKUP_DIR:-}" 2>/dev/null || true
 
     ABF_VW_TEMP_DIR=$(mktemp -d -t "abf-vw-backup-XXXXXX")
     abf_log_info "Created staging directory: ${ABF_VW_TEMP_DIR}"
