@@ -114,8 +114,8 @@ _abf_diag_check_repository() {
     }
 
     if [[ -z "${ABF_RESTIC_PASSWORD_FILE:-}" ]] \
-        || [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
-        _abf_diag_result "ERROR" "repository" "Repository password file missing: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+        || [[ ! -r "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
+        _abf_diag_result "ERROR" "repository" "Repository password file missing or not readable: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
         return 1
     fi
 
@@ -258,7 +258,7 @@ _abf_diag_check_backup_age() {
     fi
 
     if [[ -z "${ABF_RESTIC_PASSWORD_FILE:-}" ]] \
-        || [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
+        || [[ ! -r "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
         return 0
     fi
 
