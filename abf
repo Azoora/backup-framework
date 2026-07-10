@@ -56,6 +56,8 @@ Commands:
   config check             Validate configuration
   doctor [--json]          Run comprehensive health diagnostics
   schedule install <svc>   Schedule recurring backups
+                           [--frequency daily|weekly|monthly|<cron>]
+                           [--at HH:MM] [--on-day DAY] [--force]
   schedule remove <svc>    Remove a scheduled backup
   schedule status <svc>    Show schedule status for a service
   schedule list            List all scheduled backups
