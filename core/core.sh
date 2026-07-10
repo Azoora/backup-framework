@@ -358,29 +358,64 @@ _abf_notify_result() {
 
 abf_validate_config() {
     local exit_code="$ABF_EXIT_OK"
+    local errors=0
+    local warnings=0
 
+    # --- Config value checks ---
     if [[ -z "${ABF_LOG_DIR:-}" ]]; then
-        echo "ERROR: ABF_LOG_DIR is not set in abf.conf"
+        echo "  [ERROR] ABF_LOG_DIR is not set in abf.conf"
+        errors=$((errors + 1))
         exit_code="$ABF_EXIT_CONFIG_ERROR"
     fi
 
     if [[ ! -f "${ABF_ROOT}/services/manifest.conf" ]]; then
-        echo "ERROR: Service manifest not found at services/manifest.conf"
+        echo "  [ERROR] Service manifest not found at services/manifest.conf"
+        errors=$((errors + 1))
         exit_code="$ABF_EXIT_CONFIG_ERROR"
     fi
 
     while IFS= read -r svc; do
         if [[ ! -f "${ABF_ROOT}/services/${svc}/module.sh" ]]; then
-            echo "ERROR: Service '${svc}' listed in manifest but module.sh not found"
+            echo "  [ERROR] Service '${svc}' listed in manifest but module.sh not found"
+            errors=$((errors + 1))
             exit_code="$ABF_EXIT_CONFIG_ERROR"
         fi
     done < <(_abf_manifest_lines)
 
     if [[ "${ABF_STORAGE_BACKEND:-local}" != "local" ]]; then
         if [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}" ]]; then
-            echo "ERROR: Restic password file not found: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+            echo "  [ERROR] Restic password file not found: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+            errors=$((errors + 1))
             exit_code="$ABF_EXIT_CONFIG_ERROR"
         fi
+    fi
+
+    # --- Dependency checks ---
+    if ! command -v restic &>/dev/null; then
+        echo "  [WARN]  Restic not installed (required for encrypted backups)"
+        warnings=$((warnings + 1))
+    fi
+    if ! command -v rclone &>/dev/null; then
+        if [[ "${ABF_STORAGE_BACKEND:-local}" != "local" ]]; then
+            echo "  [ERROR] Rclone not installed (required for configured remote storage)"
+            errors=$((errors + 1))
+            exit_code="$ABF_EXIT_CONFIG_ERROR"
+        else
+            echo "  [WARN]  Rclone not installed (recommended for remote storage)"
+            warnings=$((warnings + 1))
+        fi
+    fi
+    if ! command -v sqlite3 &>/dev/null; then
+        echo "  [WARN]  sqlite3 not installed (recommended for consistent SQLite backups)"
+        warnings=$((warnings + 1))
+    fi
+
+    # --- Summary ---
+    echo ""
+    if [[ "$errors" -gt 0 ]] || [[ "$warnings" -gt 0 ]]; then
+        echo "  Configuration: ${errors} error(s), ${warnings} warning(s)"
+    else
+        echo "  Configuration: valid"
     fi
 
     return $exit_code

@@ -11,7 +11,118 @@ ABF_DST="/opt/abf"
 BIN_DST="/usr/local/bin"
 CONFIG_DST="/etc/abf"
 
+# ------------------------------------------------------------------
+# Dependency definitions
+# ------------------------------------------------------------------
+
+ABF_DEPS=(
+    "restic:restic:Restic (encrypted backups):required"
+    "rclone:rclone:Rclone (remote storage backends):recommended"
+    "sqlite3:sqlite3:sqlite3 (consistent SQLite database snapshots):recommended"
+)
+
+_abf_dep_name()    { echo "${1%%:*}"; }
+_abf_dep_cmd()     { local x="${1#*:}"; echo "${x%%:*}"; }
+_abf_dep_desc()    { local x="${1#*:}"; x="${x#*:}"; echo "${x%%:*}"; }
+_abf_dep_required(){ echo "${1##*:}"; }
+
+_abf_check_deps() {
+    local missing_req=0
+    local missing_rec=0
+    local missing_names=""
+    local installable=""
+
+    echo ""
+    echo "==> Checking dependencies..."
+
+    for dep in "${ABF_DEPS[@]}"; do
+        local name; name=$(_abf_dep_name "$dep")
+        local cmd;  cmd=$(_abf_dep_cmd "$dep")
+        local desc; desc=$(_abf_dep_desc "$dep")
+        local required; required=$(_abf_dep_required "$dep")
+
+        if command -v "$cmd" &>/dev/null; then
+            local ver
+            ver=$("$cmd" --version 2>/dev/null | head -1 || echo "installed")
+            echo "    [FOUND] ${name} — ${ver}"
+        else
+            if [[ "$required" == "required" ]]; then
+                echo "    [MISS]  ${name} — ${desc} (REQUIRED)"
+                missing_req=$((missing_req + 1))
+                missing_names="${missing_names} ${name}"
+                installable="${installable} ${cmd}"
+            else
+                echo "    [MISS]  ${name} — ${desc} (recommended)"
+                missing_rec=$((missing_rec + 1))
+                missing_names="${missing_names} ${name}"
+                installable="${installable} ${cmd}"
+            fi
+        fi
+    done
+
+    if [[ "$missing_req" -gt 0 ]]; then
+        echo ""
+        echo "    ERROR: ${missing_req} required dependenc(ies) missing."
+        echo "    Install missing packages and re-run this installer."
+    fi
+
+    if [[ "$missing_rec" -gt 0 ]] && [[ "$missing_req" -eq 0 ]]; then
+        # Offer auto-install on Debian/Ubuntu
+        if [[ -f /etc/os-release ]]; then
+            # shellcheck disable=SC1091
+            source /etc/os-release
+            if [[ "${ID:-}" == "debian" || "${ID:-}" == "ubuntu" || "${ID:-}" == "neon" || "${ID:-}" == "pop" || "${ID:-}" == "linuxmint" || "${ID:-}" == "elementary" ]]; then
+                _abf_install_deps_debian "$installable"
+            fi
+        fi
+    fi
+
+    return "$missing_req"
+}
+
+_abf_install_deps_debian() {
+    local packages="$1"
+    local apt_packages=""
+
+    for pkg in $packages; do
+        case "$pkg" in
+            restic) apt_packages="$apt_packages restic" ;;
+            rclone) apt_packages="$apt_packages rclone" ;;
+            sqlite3) apt_packages="$apt_packages sqlite3" ;;
+        esac
+    done
+
+    if [[ -z "$apt_packages" ]]; then
+        return 0
+    fi
+
+    echo ""
+    echo "==> Detected Debian/Ubuntu-based system."
+    echo "    The following recommended packages can be installed automatically:"
+    echo "    ${apt_packages}"
+    echo ""
+    echo -n "    Install now? [Y/n] "
+    local answer
+    read -r answer
+    if [[ -z "$answer" || "$answer" =~ ^[Yy] ]]; then
+        echo "    Installing: ${apt_packages}"
+        if sudo apt-get update -qq && sudo apt-get install -y -qq $apt_packages; then
+            echo "    Installation complete."
+        else
+            echo "    WARNING: Package installation failed."
+            echo "    Install manually: sudo apt-get install${apt_packages}"
+        fi
+    else
+        echo "    Skipped. Install manually: sudo apt-get install${apt_packages}"
+    fi
+}
+
 echo "==> Installing Backup Framework"
+
+# ------------------------------------------------------------------
+# 0. Check dependencies
+# ------------------------------------------------------------------
+_abf_check_deps || exit 1
 
 # ------------------------------------------------------------------
 # 1. Create directories

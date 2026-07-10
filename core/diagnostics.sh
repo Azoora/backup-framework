@@ -35,6 +35,37 @@ _abf_diag_overall() {
 # Individual checks
 # ------------------------------------------------------------------
 
+_abf_diag_check_sqlite3() {
+    if command -v sqlite3 &>/dev/null; then
+        _abf_diag_result "OK" "sqlite3_installed" "sqlite3 is installed"
+    else
+        _abf_diag_result "WARNING" "sqlite3_installed" "sqlite3 not installed (recommended for consistent SQLite backups)"
+    fi
+}
+
+_abf_diag_check_rclone_config() {
+    if ! command -v rclone &>/dev/null; then
+        local backend="${ABF_STORAGE_BACKEND:-local}"
+        if [[ "$backend" != "local" ]]; then
+            _abf_diag_result "ERROR" "rclone_config" "Rclone not installed (required by storage backend: ${backend})"
+        else
+            _abf_diag_result "WARNING" "rclone_config" "Rclone not installed (needed for remote storage backends)"
+        fi
+        return 0
+    fi
+
+    if rclone lsd "${STORAGE_ONEDRIVE_REMOTE:-}:" &>/dev/null 2>&1; then
+        _abf_diag_result "OK" "rclone_config" "Rclone configured and remote reachable"
+    else
+        local backend="${ABF_STORAGE_BACKEND:-local}"
+        if [[ "$backend" != "local" ]]; then
+            _abf_diag_result "ERROR" "rclone_config" "Rclone remote not reachable (required by storage backend: ${backend})"
+        else
+            _abf_diag_result "WARNING" "rclone_config" "Rclone not configured (run: rclone config)"
+        fi
+    fi
+}
+
 _abf_diag_check_version() {
     local ver
     ver=$(cat "${ABF_ROOT}/VERSION" 2>/dev/null || echo "unknown")
@@ -256,7 +287,7 @@ _abf_diag_check_backup_age() {
 # ------------------------------------------------------------------
 
 _abf_diag_output_human() {
-    local header="Running diagnostics for Backup Framework v$(cat "${ABF_ROOT}/VERSION" 2>/dev/null || echo "?")"
+    local header="Diagnostics — Backup Framework v$(cat "${ABF_ROOT}/VERSION" 2>/dev/null || echo "?")"
     local sep
     sep=$(printf '%*s' "${#header}" '' | tr ' ' '=')
 
@@ -265,24 +296,33 @@ _abf_diag_output_human() {
     echo "${sep}"
     echo ""
 
+    local errors=0 warnings=0 passes=0
     for entry in "${ABF_DIAG_RESULTS[@]}"; do
         local status="${entry%%|*}"
         local rest="${entry#*|}"
         local name="${rest%%|*}"
         local message="${rest#*|}"
 
-        local icon color status_text
         case "$status" in
-            OK)      icon="✓"; color=""; status_text="" ;;
-            WARNING) icon="⚠"; color=""; status_text=" [WARNING]" ;;
-            ERROR)   icon="✗"; color=""; status_text=" [ERROR]" ;;
+            OK)
+                printf "  [PASS] %s  — %s\n" "$name" "$message"
+                passes=$((passes + 1))
+                ;;
+            WARNING)
+                printf "  [WARN] %s  — %s\n" "$name" "$message"
+                warnings=$((warnings + 1))
+                ;;
+            ERROR)
+                printf "  [FAIL] %s  — %s\n" "$name" "$message"
+                errors=$((errors + 1))
+                ;;
         esac
-
-        printf " %s %s%s\n" "$icon" "$message" "$status_text"
     done
 
     echo ""
-    echo "Overall status: ${ABF_DIAG_OVERALL}"
+    echo "${sep}"
+    echo "  Overall: ${ABF_DIAG_OVERALL}  (${passes} passed, ${warnings} warnings, ${errors} errors)"
+    echo "${sep}"
     echo ""
 }
 
@@ -330,6 +370,8 @@ abf_doctor_run() {
         _abf_diag_check_config
         _abf_diag_check_restic
         _abf_diag_check_rclone
+        _abf_diag_check_sqlite3
+        _abf_diag_check_rclone_config
         _abf_diag_check_repository
         _abf_diag_check_storage_backend
         _abf_diag_check_smtp

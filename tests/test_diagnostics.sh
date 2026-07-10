@@ -93,10 +93,10 @@ test_diag_human_output() {
     local human_output
     human_output=$(_abf_diag_output_human 2>/dev/null || true)
 
-    assert_contains "$human_output" "Overall status:" "Human output contains overall"
+    assert_contains "$human_output" "Overall:" "Human output contains overall"
     assert_contains "$human_output" "WARNING" "Human output shows WARNING status"
-    assert_contains "$human_output" "✓" "Human output shows OK icon"
-    assert_contains "$human_output" "⚠" "Human output shows WARNING icon"
+    assert_contains "$human_output" "[PASS]" "Human output shows PASS tag"
+    assert_contains "$human_output" "[WARN]" "Human output shows WARN tag"
 }
 
 test_diag_exit_codes() {
@@ -141,4 +141,76 @@ test_diag_backup_age_messages() {
             fi
         done
     fi
+}
+
+test_diag_sqlite3_check() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/core/diagnostics.sh"
+
+    ABF_DIAG_RESULTS=()
+    _abf_diag_check_sqlite3
+
+    local found=false
+    for entry in "${ABF_DIAG_RESULTS[@]}"; do
+        if echo "$entry" | grep -q "sqlite3_installed"; then
+            found=true
+            if command -v sqlite3 &>/dev/null; then
+                assert_contains "$entry" "OK" "sqlite3 check OK when installed"
+            else
+                assert_contains "$entry" "WARNING" "sqlite3 check WARNING when not installed"
+            fi
+        fi
+    done
+    $found || { echo "  FAIL: No sqlite3 check result"; return 1; }
+}
+
+test_diag_rclone_config_check() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/core/diagnostics.sh"
+
+    # Rclone config check with local storage (no rclone)
+    export ABF_STORAGE_BACKEND="local"
+    ABF_DIAG_RESULTS=()
+    _abf_diag_check_rclone_config
+
+    local found=false
+    for entry in "${ABF_DIAG_RESULTS[@]}"; do
+        if echo "$entry" | grep -q "rclone_config"; then
+            found=true
+            # Should be WARNING in local mode without rclone
+            assert_contains "$entry" "WARNING" "rclone config WARNING in local mode"
+        fi
+    done
+    $found || { echo "  FAIL: No rclone_config check result"; return 1; }
+}
+
+test_diag_human_output_format() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-diag-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "diag-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/diagnostics.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    ABF_DIAG_RESULTS=()
+    _abf_diag_result "OK" "test_check" "test message"
+    _abf_diag_result "WARNING" "warn_check" "warning message"
+    _abf_diag_result "ERROR" "err_check" "error message"
+
+    _abf_diag_overall
+    local human_output
+    human_output=$(_abf_diag_output_human 2>/dev/null || true)
+
+    # Verify new format markers
+    assert_contains "$human_output" "[PASS]" "Human output contains PASS marker"
+    assert_contains "$human_output" "[WARN]" "Human output contains WARN marker"
+    assert_contains "$human_output" "[FAIL]" "Human output contains FAIL marker"
+    assert_contains "$human_output" "Overall:" "Human output contains Overall line"
+    assert_contains "$human_output" "1 passed" "Human output shows pass count"
+    assert_contains "$human_output" "1 warnings" "Human output shows warning count"
+    assert_contains "$human_output" "1 errors" "Human output shows error count"
 }

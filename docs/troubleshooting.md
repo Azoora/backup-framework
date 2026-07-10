@@ -6,7 +6,8 @@
 abf config check
 ```
 
-This validates all configuration files and reports any issues.
+This validates all configuration files and reports all errors and warnings together,
+with a summary count at the end.
 
 ## Common Issues
 

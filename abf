@@ -162,10 +162,12 @@ _abf_cmd_list() {
 
 _abf_cmd_config_check() {
     echo "Validating configuration..."
+    echo ""
     if abf_validate_config; then
-        echo "Configuration is valid."
+        echo "Configuration check: PASS"
         return "$ABF_EXIT_OK"
     else
+        echo "Configuration check: FAIL"
         return "$ABF_EXIT_CONFIG_ERROR"
     fi
 }

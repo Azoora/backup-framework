@@ -145,3 +145,54 @@ test_validate_config_valid() {
     fi
     return 0
 }
+
+test_validate_config_outputs_summary() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    export ABF_LOG_DIR="/tmp"
+    export ABF_STORAGE_BACKEND="local"
+
+    local output
+    output=$(abf_validate_config 2>/dev/null || true)
+
+    if ! echo "$output" | grep -q "error(s)\|warning(s)\|valid"; then
+        echo "  FAIL: Validation output should contain summary"
+        return 1
+    fi
+    return 0
+}
+
+test_validate_config_reports_all_errors() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    unset ABF_LOG_DIR
+    export ABF_STORAGE_BACKEND="local"
+
+    local output
+    output=$(abf_validate_config 2>/dev/null || true)
+
+    assert_contains "$output" "ABF_LOG_DIR" "Reports missing ABF_LOG_DIR"
+    assert_contains "$output" "error(s)" "Summary shows error count"
+    return 0
+}
+
+test_validate_config_with_warnings() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    export ABF_LOG_DIR="/tmp"
+    export ABF_STORAGE_BACKEND="local"
+
+    local output
+    output=$(abf_validate_config 2>/dev/null || true)
+
+    if ! echo "$output" | grep -q "\[WARN\]\|\[ERROR\]"; then
+        assert_contains "$output" "valid" "Clean config with missing optional deps shows valid"
+    fi
+    return 0
+}

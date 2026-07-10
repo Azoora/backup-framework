@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1-beta (2026-07-10)
+
+### Milestone 3 — Installation & Diagnostics Improvements
+
+- `install.sh`: dependency detection (restic, rclone, sqlite3) with auto-install on Debian/Ubuntu
+- `abf config check`: batch error reporting — all errors reported together with summary
+- `abf doctor`: new checks (sqlite3, rclone configuration), improved [PASS]/[WARN]/[FAIL] output format
+- 6 new automated tests (62 total)
+
 ## 0.1.0-beta (2026-07-10)
 
 ### Milestone 2 — Restic, Notifications, Retention, Scheduling

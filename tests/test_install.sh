@@ -74,7 +74,7 @@ test_install_abf_root_dev_mode() {
     # Verify the launcher can compute its own root and source modules
     local version_out
     version_out=$(cd "${tmpdir}/checkout" && ./abf --version 2>&1)
-    assert_contains "$version_out" "0.1.0-beta" "Dev mode reports correct version"
+    assert_contains "$version_out" "0.1.1-beta" "Dev mode reports correct version"
 }
 
 test_install_abf_root_installed_mode() {
@@ -131,4 +131,56 @@ test_install_script_idempotent() {
         content=$(cat "${tmpdir}/opt/abf/VERSION")
         assert_eq "already-installed" "$content" "Existing installation preserved"
     fi
+}
+
+test_install_has_dependency_checking() {
+    local install="${ABF_ROOT}/scripts/install.sh"
+
+    # Verify dependency definitions exist
+    if ! grep -q "ABF_DEPS=" "$install"; then
+        echo "  FAIL: install.sh missing ABF_DEPS definitions"
+        return 1
+    fi
+
+    # Verify dependency functions exist
+    if ! grep -q "_abf_check_deps()" "$install"; then
+        echo "  FAIL: install.sh missing _abf_check_deps()"
+        return 1
+    fi
+    if ! grep -q "_abf_install_deps_debian()" "$install"; then
+        echo "  FAIL: install.sh missing _abf_install_deps_debian()"
+        return 1
+    fi
+
+    # Verify required dependencies are listed
+    local deps_section
+    deps_section=$(grep -A20 "ABF_DEPS=(" "$install")
+    assert_contains "$deps_section" "restic" "install.sh checks for restic"
+    assert_contains "$deps_section" "rclone" "install.sh checks for rclone"
+    assert_contains "$deps_section" "sqlite3" "install.sh checks for sqlite3"
+
+    return 0
+}
+
+test_install_dep_check_restic_required() {
+    local install="${ABF_ROOT}/scripts/install.sh"
+
+    # Verify restic is marked as required
+    local restic_line
+    restic_line=$(grep "restic:" "$install" | grep "required" || true)
+    if [[ -z "$restic_line" ]]; then
+        echo "  FAIL: restic should be marked as required dependency"
+        return 1
+    fi
+    return 0
+}
+
+test_install_sources_version_file() {
+    # Verify install.sh references VERSION (the framework version, not install.sh version)
+    local install="${ABF_ROOT}/scripts/install.sh"
+    if ! grep -q "ABF_SRC" "$install"; then
+        echo "  FAIL: install.sh should define ABF_SRC"
+        return 1
+    fi
+    return 0
 }

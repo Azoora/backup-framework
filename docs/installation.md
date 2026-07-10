@@ -18,10 +18,12 @@ sudo ./scripts/install.sh
 
 The installer:
 
-1. Copies the full framework to `/opt/abf/`
-2. Creates a lightweight wrapper at `/usr/local/bin/abf` that execs `/opt/abf/abf`
-3. Copies default configuration to `/etc/abf/` (never overwrites existing files)
-4. Creates runtime directories (`/var/log/abf`, `/var/cache/abf`)
+1. Checks for required dependencies (restic) and recommended dependencies (rclone, sqlite3)
+2. On Debian/Ubuntu, offers to install missing recommended packages automatically via `apt`
+3. Copies the full framework to `/opt/abf/`
+4. Creates a lightweight wrapper at `/usr/local/bin/abf` that execs `/opt/abf/abf`
+5. Copies default configuration to `/etc/abf/` (never overwrites existing files)
+6. Creates runtime directories (`/var/log/abf`, `/var/cache/abf`)
 
 ## Manual Install
 
