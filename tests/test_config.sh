@@ -184,6 +184,18 @@ test_validate_config_reports_all_errors() {
     return 0
 }
 
+test_default_paths_are_user_writable() {
+    local config="${ABF_ROOT}/config/abf.conf"
+    local log_dir
+
+    log_dir=$(grep '^ABF_LOG_DIR=' "$config" | head -1 | cut -d'"' -f2)
+    if [[ "$log_dir" != /tmp/* ]]; then
+        echo "  FAIL: Default ABF_LOG_DIR (${log_dir}) is not user-writable"
+        return 1
+    fi
+    return 0
+}
+
 test_validate_config_with_warnings() {
     source "${ABF_ROOT}/core/exit_codes.sh"
     source "${ABF_ROOT}/core/config.sh"

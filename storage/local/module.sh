@@ -7,7 +7,7 @@
 # against the local path.
 # ---------------------------------------------------------------------------
 
-STORAGE_LOCAL_REPO_PATH="${STORAGE_LOCAL_REPO_PATH:-/var/backups/abf/restic}"
+STORAGE_LOCAL_REPO_PATH="${STORAGE_LOCAL_REPO_PATH:-/tmp/abf/restic}"
 
 storage_pre_upload() {
     local dir

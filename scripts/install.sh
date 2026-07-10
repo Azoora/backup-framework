@@ -195,6 +195,13 @@ copy_default "${ABF_SRC}/config/smtp.conf"           "${CONFIG_DST}/smtp.conf"
 copy_default "${ABF_SRC}/config/services/vaultwarden.conf" \
              "${CONFIG_DST}/services/vaultwarden.conf"
 
+# Override dev defaults with production paths when installing fresh config
+if grep -q 'ABF_LOG_DIR="/tmp/abf/logs"' "${CONFIG_DST}/abf.conf" 2>/dev/null; then
+    sed -i 's|ABF_LOG_DIR="/tmp/abf/logs"|ABF_LOG_DIR="/var/log/abf"|' "${CONFIG_DST}/abf.conf"
+    sed -i 's|ABF_CACHE_DIR="/tmp/abf/cache"|ABF_CACHE_DIR="/var/cache/abf"|' "${CONFIG_DST}/abf.conf"
+    echo "    Production paths set in ${CONFIG_DST}/abf.conf"
+fi
+
 # ------------------------------------------------------------------
 # 5. Verify installation
 # ------------------------------------------------------------------

@@ -5,7 +5,7 @@
 ### Milestone 3 — Local Storage Backend, Installation & Diagnostics Improvements
 
 - New `local` storage backend: stores Restic repositories on the local filesystem
-  - Configurable via `STORAGE_LOCAL_REPO_PATH` (default: `/var/backups/abf/restic`)
+  - Configurable via `STORAGE_LOCAL_REPO_PATH` (default: `/tmp/abf/restic`)
   - Supports init, backup, restore, snapshot listing, verification
 - `ABF_STORAGE_BACKEND=local` now works as a proper storage backend (was a no-op pseudo-backend)
 
