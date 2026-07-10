@@ -38,6 +38,8 @@ source "${ABF_ROOT}/core/scheduler.sh"
 source "${ABF_ROOT}/core/diagnostics.sh"
 # shellcheck source=core/migrate.sh
 source "${ABF_ROOT}/core/migrate.sh"
+# shellcheck source=core/restore.sh
+source "${ABF_ROOT}/core/restore.sh"
 # shellcheck source=core/core.sh
 source "${ABF_ROOT}/core/core.sh"
 
@@ -53,7 +55,7 @@ Usage: abf [options] <command> [args]
 
 Commands:
   backup <service>         Create a backup of the specified service
-  restore <service>        Restore the specified service from a backup
+  restore <service>        Restore the specified service [--dry-run] [--snapshot ID] [--yes]
   list [service]           List available restic snapshots
    config check             Validate configuration
    config migrate           Migrate configuration (upgrade defaults)
@@ -74,6 +76,7 @@ Options:
 Examples:
   abf backup vaultwarden
   abf restore vaultwarden --dry-run
+  abf restore vaultwarden --yes
   abf schedule install vaultwarden --frequency daily --at 02:00
   abf schedule remove vaultwarden
   abf schedule list
@@ -109,6 +112,7 @@ _abf_cmd_restore() {
     local service_name="$1"
     local snapshot="${2:-}"
     local dry_run="${3:-false}"
+    local yes="${4:-false}"
     local log_dir="${ABF_LOG_DIR:-}"
 
     abf_init_logging "$service_name" "restore" "$log_dir"
@@ -139,7 +143,7 @@ _abf_cmd_restore() {
         abf_log_info "Auto-selected latest snapshot: ${snapshot}"
     fi
 
-    abf_run_restore "$service_name" "$snapshot" "$dry_run"
+    abf_run_restore "$service_name" "$snapshot" "$dry_run" "$yes"
 }
 
 # ------------------------------------------------------------------
@@ -213,20 +217,33 @@ _abf_main() {
         restore)
             local snapshot=""
             local dry_run="false"
+            local yes="false"
+            local service_name=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --snapshot) snapshot="$2"; shift 2 ;;
             --dry-run)  dry_run="true"; shift ;;
-            *)          break ;;
+            --yes|-y)   yes="true"; shift ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                exit 1
+                ;;
+            *)
+                if [[ -z "$service_name" ]]; then
+                    service_name="$1"
+                fi
+                shift
+                ;;
         esac
     done
-    if [[ $# -lt 1 ]]; then
-        echo "Usage: abf restore <service> [--snapshot ID] [--dry-run]" >&2
+    if [[ -z "$service_name" ]]; then
+        echo "Usage: abf restore <service> [--snapshot ID] [--dry-run] [--yes]" >&2
         echo "  --snapshot ID   Restic snapshot ID (default: latest)" >&2
         echo "  --dry-run       Simulate restore without modifying files" >&2
+        echo "  --yes, -y       Skip interactive confirmation" >&2
         exit 1
     fi
-            _abf_cmd_restore "$1" "$snapshot" "$dry_run"
+            _abf_cmd_restore "$service_name" "$snapshot" "$dry_run" "$yes"
             ;;
         list)
             _abf_cmd_list "${1:-}"

@@ -242,6 +242,7 @@ abf_run_restore() {
     local service_name="$1"
     local snapshot="${2:-}"
     local dry_run="${3:-false}"
+    local yes="${4:-false}"
     local rc="$ABF_EXIT_OK"
 
     abf_log_info "Starting restore for service: ${service_name}"
@@ -250,35 +251,64 @@ abf_run_restore() {
     abf_load_service_config "$service_name"
     _abf_call_optional service_healthcheck "restore"
 
-    # ----- privilege check -----
-    _abf_check_backup_privileges "$service_name" || return "$ABF_EXIT_CONFIG_ERROR"
+    # ----- lock -----
+    abf_lock_init
+    abf_lock_acquire "$service_name" || return "$ABF_EXIT_LOCK_ERROR"
+    ABF_LOCK_SERVICE="$service_name"
+    trap 'abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""; trap - EXIT' EXIT
 
+    # ----- privilege check -----
+    _abf_check_restore_privileges "$service_name" || {
+        rc="$ABF_EXIT_RESTORE_FAILED"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
+        return "$rc"
+    }
+
+    # ----- confirmation -----
+    _abf_require_confirmation "$dry_run" "$yes"
+    local confirm_rc=$?
+    if [[ $confirm_rc -eq 1 ]]; then
+        # User cancelled — clean exit, not an error
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
+        return "$ABF_EXIT_OK"
+    elif [[ $confirm_rc -ne 0 ]]; then
+        # Non-interactive without --yes
+        rc="$confirm_rc"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
+        return "$rc"
+    fi
+
+    # ----- pre-restore -----
     service_pre_restore "$snapshot" "$dry_run" || {
         rc="$ABF_EXIT_RESTORE_FAILED"
         service_post_restore
         _abf_call_optional service_cleanup "restore"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
         return "$rc"
     }
+
+    abf_log_info "Restoring snapshot ${snapshot} for ${service_name}..."
 
     if [[ "$dry_run" == "true" ]]; then
         service_restore "$snapshot" "true" || rc="$ABF_EXIT_RESTORE_FAILED"
     else
-        # Restic restore into staging dir, then service copies from there
         local staging
         staging=$(mktemp -d -t "abf-restore-XXXXXX")
 
+        abf_log_info "Decrypting backup..."
         if abf_restic_init "$(_abf_get_storage_repo)"; then
             abf_restic_restore "$snapshot" "$staging" "$service_name" || {
                 rc="$ABF_EXIT_RESTORE_FAILED"
             }
         fi
 
-        # Pass staging dir to service via environment
         ABF_RESTORE_STAGING="$staging"
+        abf_log_info "Copying files to service directory..."
         service_restore "$snapshot" "false" || rc="$ABF_EXIT_RESTORE_FAILED"
         rm -rf "$staging"
     fi
 
+    abf_log_info "Running verification..."
     service_verify_restore || {
         rc="$ABF_EXIT_VERIFICATION_FAILED"
         abf_log_warning "Restore verification reported issues"
@@ -290,6 +320,10 @@ abf_run_restore() {
     if [[ "$rc" -eq "$ABF_EXIT_OK" ]]; then
         abf_log_success "Restore completed for service: ${service_name}"
     fi
+
+    trap - EXIT
+    abf_lock_release "$ABF_LOCK_SERVICE"
+    ABF_LOCK_SERVICE=""
     return "$rc"
 }
 

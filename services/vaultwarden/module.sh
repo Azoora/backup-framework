@@ -114,22 +114,20 @@ service_restore() {
         return 0
     fi
 
-    abf_log_info "Restore will overwrite files in ${data_dir}"
-    abf_log_info "Press Ctrl+C within 5 seconds to abort..."
-    sleep 5
-    abf_log_info "Proceeding with restore"
-
+    abf_log_info "Restoring files to ${data_dir}..."
     _vw_restore_all "$staging" "$data_dir"
     return 0
 }
 
 service_verify_restore() {
-    abf_log_info "Restore verification: checking data directory"
     if [[ ! -d "${SERVICE_VAULTWARDEN_DATA_DIR}" ]]; then
-        abf_log_error "Data directory missing after restore"
+        abf_log_error "Verification failed: data directory missing after restore"
         return 1
     fi
-    abf_log_success "Data directory exists and is accessible"
+
+    local file_count
+    file_count=$(find "${SERVICE_VAULTWARDEN_DATA_DIR}" -type f 2>/dev/null | wc -l)
+    abf_log_success "Verification passed: ${file_count} file(s) in data directory"
     return 0
 }
 
@@ -280,13 +278,13 @@ _vw_restore_all() {
 
     local rsa_src="${staging}/rsa_keys"
     if [[ -d "$rsa_src" ]]; then
-        abf_log_info "Restoring RSA keys"
+        abf_log_info "  Restoring RSA keys..."
         for key_file in "$rsa_src"/*; do
             if [[ -f "$key_file" ]]; then
                 cp "$key_file" "$data_dir/"
-                abf_log_info "  Restored: $(basename "$key_file")"
             fi
         done
+        abf_log_success "  Restored: RSA keys"
     fi
 }
 
@@ -298,12 +296,13 @@ _vw_restore_item() {
     local src="${staging}/${name}"
 
     if [[ ! -f "$src" ]]; then
-        abf_log_info "${label} not in archive -- skipping"
+        abf_log_info "  ${label} not in archive -- skipping"
         return
     fi
 
+    abf_log_info "  Restoring ${label}..."
     cp "$src" "${data_dir}/${name}"
-    abf_log_info "Restored: ${name}"
+    abf_log_success "  Restored: ${name}"
 }
 
 _vw_restore_dir() {
@@ -314,13 +313,16 @@ _vw_restore_dir() {
     local dst="${data_dir}/${name}"
 
     if [[ ! -d "$src" ]]; then
-        abf_log_info "${name} not in archive -- skipping"
+        abf_log_info "  ${name} not in archive -- skipping"
         return
     fi
 
     if [[ -d "$dst" ]]; then
+        abf_log_info "  Merging ${name}..."
         rm -rf "$dst"
+    else
+        abf_log_info "  Restoring ${name}..."
     fi
     cp -r "$src" "$dst"
-    abf_log_info "Restored: ${name}/"
+    abf_log_success "  Restored: ${name}/"
 }
