@@ -73,3 +73,88 @@ test_log_error() {
     assert_contains "$content" "ERROR" "Error log has ERROR level"
     assert_contains "$content" "Something broke" "Error log has message"
 }
+
+test_log_falls_back_to_console_when_dir_unwritable() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-log-XXXXXX")
+    local log_dir="${tmpdir}/readonly"
+    mkdir -p "$log_dir"
+    chmod 555 "$log_dir"
+
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "test-svc" "backup" "$log_dir"
+
+    # Log file variables should be cleared (fallback to console)
+    if [[ -n "${ABF_LOG_FILE:-}" ]]; then
+        echo "  FAIL: ABF_LOG_FILE should be empty when dir is unwritable (got: ${ABF_LOG_FILE})"
+        chmod 755 "$log_dir"
+        return 1
+    fi
+    if [[ -n "${ABF_LOG_JSON_FILE:-}" ]]; then
+        echo "  FAIL: ABF_LOG_JSON_FILE should be empty when dir is unwritable"
+        chmod 755 "$log_dir"
+        return 1
+    fi
+
+    chmod 755 "$log_dir"
+    return 0
+}
+
+test_log_no_permission_denied_on_console_when_unwritable() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-log-XXXXXX")
+    local log_dir="${tmpdir}/readonly"
+    mkdir -p "$log_dir"
+    chmod 555 "$log_dir"
+
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "test-svc" "backup" "$log_dir"
+
+    # Capture stderr while logging — must not contain "Permission denied"
+    local stderr_output
+    stderr_output=$(abf_log_error "This should not leak file errors" 2>&1 1>/dev/null)
+
+    chmod 755 "$log_dir"
+
+    if echo "$stderr_output" | grep -qi "permission denied\|cannot create\|no such file"; then
+        echo "  FAIL: Error messages leaked to console: $stderr_output"
+        return 1
+    fi
+
+    return 0
+}
+
+test_log_no_redirect_errors_on_console() {
+    # Direct test: verify that file redirect failures never leak to the console
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-log-XXXXXX")
+    # Create a parent dir that is NOT writable, so child dir creation fails
+    local parent="${tmpdir}/readonly-parent"
+    mkdir -p "$parent"
+    chmod 555 "$parent"
+    local log_dir="${parent}/logs"
+
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "test-svc" "backup" "$log_dir"
+
+    # Log with INFO (stdout) — must NOT contain shell redirect errors
+    local stdout_output
+    stdout_output=$(abf_log_info "Console only" 2>/dev/null)
+    if echo "$stdout_output" | grep -qi "no such file\|permission denied\|cannot"; then
+        echo "  FAIL: Redirect error leaked to stdout: $stdout_output"
+        chmod 755 "$parent"
+        return 1
+    fi
+
+    # Log with ERROR (stderr) — must NOT contain shell redirect errors
+    local stderr_output
+    stderr_output=$(abf_log_error "Console only error" 2>&1 1>/dev/null)
+    if echo "$stderr_output" | grep -qi "no such file\|permission denied\|cannot"; then
+        echo "  FAIL: Redirect error leaked to stderr: $stderr_output"
+        chmod 755 "$parent"
+        return 1
+    fi
+
+    chmod 755 "$parent"
+    return 0
+}

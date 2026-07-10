@@ -28,7 +28,18 @@ abf_init_logging() {
     ABF_LOG_FILE="${log_dir}/${service}_${operation}_${timestamp}.log"
     ABF_LOG_JSON_FILE="${log_dir}/${service}_${operation}_${timestamp}.jsonl"
 
-    mkdir -p "$log_dir" 2>/dev/null || true
+    if ! mkdir -p "$log_dir" 2>/dev/null; then
+        # Directory not creatable — fall back to console-only logging
+        ABF_LOG_FILE=""
+        ABF_LOG_JSON_FILE=""
+        return 0
+    fi
+
+    # Verify we can actually write to the file (catches read-only dirs)
+    if ! touch "$ABF_LOG_FILE" 2>/dev/null; then
+        ABF_LOG_FILE=""
+        ABF_LOG_JSON_FILE=""
+    fi
 }
 
 # ------------------------------------------------------------------
@@ -71,7 +82,7 @@ _abf_write_human() {
     fi
 
     if [[ -n "${ABF_LOG_FILE:-}" ]]; then
-        echo "$line" >> "$ABF_LOG_FILE" 2>/dev/null || true
+        (echo "$line" >> "$ABF_LOG_FILE") 2>/dev/null || true
     fi
 }
 
@@ -83,8 +94,8 @@ _abf_write_machine() {
     escaped=$(printf '%s' "$message" | sed 's/"/\\"/g')
 
     if [[ -n "${ABF_LOG_JSON_FILE:-}" ]]; then
-        printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
+        (printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
             "$timestamp" "$level" "$escaped" \
-            >> "$ABF_LOG_JSON_FILE" 2>/dev/null || true
+            >> "$ABF_LOG_JSON_FILE") 2>/dev/null || true
     fi
 }
