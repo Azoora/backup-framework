@@ -40,7 +40,7 @@ test_backup_creates_staging_dir() {
     service_verify_backup || return 1
 
     # Verify staging directory has expected files
-    local staging="$ABF_VW_TEMP_DIR"
+    local staging="$ABF_SERVICE_STAGING_DIR"
     if [[ ! -d "$staging" ]]; then
         echo "  FAIL: Staging directory not created"
         return 1
@@ -73,7 +73,7 @@ test_backup_respects_disabled_components() {
     service_pre_backup || return 1
     service_backup || return 1
 
-    local staging="$ABF_VW_TEMP_DIR"
+    local staging="$ABF_SERVICE_STAGING_DIR"
     if [[ -f "$staging/db.sqlite3" ]]; then
         echo "  FAIL: Stage should not contain db.sqlite3 (disabled)"
         service_post_backup
@@ -100,7 +100,7 @@ test_restore_dry_run_does_not_modify() {
     service_verify_backup || return 1
 
     # Save staging path before cleanup
-    local staging="${ABF_VW_TEMP_DIR:-}"
+    local staging="${ABF_SERVICE_STAGING_DIR:-}"
     if [[ ! -d "$staging" ]]; then
         echo "  FAIL: Staging dir not created"
         service_post_backup
@@ -145,8 +145,8 @@ test_healthcheck_detects_missing_data_dir() {
 test_cleanup_removes_stale_temp_dir() {
     local tmpdir
     tmpdir=$(mktemp -d -t "abf-test-vw-XXXXXX")
-    export ABF_VW_TEMP_DIR="${tmpdir}/stale"
-    mkdir -p "$ABF_VW_TEMP_DIR"
+    export ABF_SERVICE_STAGING_DIR="${tmpdir}/stale"
+    mkdir -p "$ABF_SERVICE_STAGING_DIR"
 
     source "${ABF_ROOT}/core/log.sh"
     abf_init_logging "vaultwarden" "test" "${tmpdir}/logs"
@@ -168,8 +168,8 @@ test_verify_fails_on_empty_staging() {
     abf_init_logging "vaultwarden" "test" "${tmpdir}/logs"
     source "${ABF_ROOT}/services/vaultwarden/module.sh"
 
-    ABF_VW_TEMP_DIR="${tmpdir}/empty"
-    mkdir -p "$ABF_VW_TEMP_DIR"
+    ABF_SERVICE_STAGING_DIR="${tmpdir}/empty"
+    mkdir -p "$ABF_SERVICE_STAGING_DIR"
 
     if service_verify_backup; then
         echo "  FAIL: Verify should fail for empty staging dir"

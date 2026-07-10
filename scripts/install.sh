@@ -215,6 +215,8 @@ copy_default "${ABF_SRC}/config/storage.conf"        "${CONFIG_DST}/storage.conf
 copy_default "${ABF_SRC}/config/smtp.conf"           "${CONFIG_DST}/smtp.conf"
 copy_default "${ABF_SRC}/config/services/vaultwarden.conf" \
              "${CONFIG_DST}/services/vaultwarden.conf"
+copy_default "${ABF_SRC}/config/services/immich.conf" \
+             "${CONFIG_DST}/services/immich.conf"
 
 # Run config migration to upgrade any stale default values
 # (e.g. /var/log/abf -> /tmp/abf/logs) left by previous installs.
@@ -244,7 +246,9 @@ echo ""
 echo "Next steps:"
 echo "  1. Edit ${CONFIG_DST}/services/vaultwarden.conf to set"
 echo "     your Vaultwarden data directory"
-echo "  2. Run: abf config check"
-echo "  3. Run: abf backup vaultwarden"
+echo "  2. Edit ${CONFIG_DST}/services/immich.conf to set"
+echo "     your Immich data directory"
+echo "  3. Run: abf config check"
+echo "  4. Run: abf backup vaultwarden or abf backup immich"
 echo ""
 echo "To uninstall: sudo bash ${ABF_DST}/scripts/uninstall.sh"

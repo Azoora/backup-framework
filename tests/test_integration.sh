@@ -186,7 +186,125 @@ test_integration_list_services() {
         echo "  Output: ${output}"
         return 1
     fi
+    if ! echo "$output" | grep -q "immich"; then
+        echo "  FAIL: immich should appear in service list"
+        echo "  Output: ${output}"
+        return 1
+    fi
 
+    return 0
+}
+
+test_integration_backup_immich_via_cli() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-int-XXXXXX")
+
+    local data_dir="${tmpdir}/immich-data"
+    mkdir -p "$data_dir/uploads/library" "$data_dir/uploads/upload" \
+             "$data_dir/uploads/profile" "$data_dir/thumbnails" \
+             "$data_dir/encoding"
+    touch "$data_dir/uploads/library/photo1.jpg"
+    touch "$data_dir/uploads/upload/video1.mp4"
+    touch "$data_dir/uploads/profile/avatar.png"
+    touch "$data_dir/thumbnails/thumb1.webp"
+    touch "$data_dir/encoding/profile1.json"
+    echo "DB_HOST=localhost" > "$data_dir/.env"
+    echo "DB_NAME=immich"   >> "$data_dir/.env"
+
+    local config_dir="${tmpdir}/config"
+    mkdir -p "$config_dir/services"
+
+    cat > "$config_dir/abf.conf" <<EOF
+ABF_LOG_DIR="${tmpdir}/logs"
+ABF_CACHE_DIR="${tmpdir}/cache"
+ABF_TEMP_DIR="${tmpdir}"
+ABF_LOCK_DIR="${tmpdir}/locks"
+ABF_STORAGE_BACKEND="local"
+ABF_RESTIC_PASSWORD_FILE="${tmpdir}/restic-pw"
+STORAGE_LOCAL_REPO_PATH="${tmpdir}/repo"
+EOF
+
+    cat > "$config_dir/services/immich.conf" <<EOF
+SERVICE_IMMICH_DATA_DIR="${data_dir}"
+SERVICE_IMMICH_BACKUP_DIR="${tmpdir}/im-backup"
+EOF
+
+    echo "test-pw-immich" > "${tmpdir}/restic-pw"
+
+    local output rc=0
+    output=$("${ABF_ROOT}/abf" --config "$config_dir" backup immich 2>&1) || rc=$?
+
+    if echo "$output" | grep -q "unbound variable"; then
+        echo "  FAIL: Unbound variable crash in Immich backup"
+        echo "  Output: ${output}"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    if [[ "$rc" -ne 0 ]]; then
+        if echo "$output" | grep -qi "restic not found"; then
+            rm -rf "$tmpdir"
+            return 0
+        fi
+        if echo "$output" | grep -qi "password file"; then
+            rm -rf "$tmpdir"
+            return 0
+        fi
+        echo "  FAIL: Immich backup failed with unexpected error (rc=${rc})"
+        echo "  Output: ${output}"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
+    return 0
+}
+
+test_integration_immich_lock_released_after_backup() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-int-XXXXXX")
+    local config_dir="${tmpdir}/config"
+    mkdir -p "$config_dir/services"
+
+    cat > "$config_dir/abf.conf" <<EOF
+ABF_LOG_DIR="${tmpdir}/logs"
+ABF_CACHE_DIR="${tmpdir}/cache"
+ABF_TEMP_DIR="${tmpdir}"
+ABF_LOCK_DIR="${tmpdir}/locks"
+ABF_STORAGE_BACKEND="local"
+ABF_RESTIC_PASSWORD_FILE="${tmpdir}/restic-pw"
+EOF
+
+    local data_dir="${tmpdir}/im-data"
+    mkdir -p "$data_dir/uploads" "$data_dir/thumbnails"
+    touch "$data_dir/uploads/photo.jpg"
+    touch "$data_dir/.env"
+
+    cat > "$config_dir/services/immich.conf" <<EOF
+SERVICE_IMMICH_DATA_DIR="${data_dir}"
+SERVICE_IMMICH_BACKUP_DIR="${tmpdir}/im-backup"
+EOF
+    echo "test-pw-im" > "${tmpdir}/restic-pw"
+
+    local output rc=0
+    output=$("${ABF_ROOT}/abf" --config "$config_dir" backup immich 2>&1) || rc=$?
+
+    if echo "$output" | grep -q "unbound variable"; then
+        echo "  FAIL: Unbound variable crash"
+        echo "  Output: ${output}"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    if [[ -f "${tmpdir}/locks/immich.lock" ]]; then
+        local lock_pid
+        lock_pid=$(cat "${tmpdir}/locks/immich.lock" 2>/dev/null)
+        echo "  FAIL: Immich lock file not released after backup (PID ${lock_pid})"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
     return 0
 }
 

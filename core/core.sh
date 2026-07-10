@@ -175,7 +175,7 @@ abf_run_backup() {
         trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
         return "$rc"
     }
-    ABF_STAGING_DIR="${ABF_VW_TEMP_DIR:-}"
+    ABF_STAGING_DIR="${ABF_SERVICE_STAGING_DIR:-}"
 
     # ----- backup (populate staging dir) -----
     service_backup || {
