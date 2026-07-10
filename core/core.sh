@@ -304,19 +304,17 @@ _abf_svc_var_prefix() {
 
 _abf_get_storage_repo() {
     local backend="${ABF_STORAGE_BACKEND:-local}"
-    if [[ "$backend" == "local" ]]; then
-        return 1
-    fi
     abf_load_storage_module "$backend" 2>/dev/null || return 1
     abf_load_storage_config "$backend" 2>/dev/null
-    _abf_call_optional storage_pre_upload || return 1
+    # Redirect stdout to stderr so pre_upload log messages don't pollute the repo URL
+    { _abf_call_optional storage_pre_upload; } 1>&2 || return 1
     storage_get_repo_url 2>/dev/null || return 1
 }
 
 _abf_restic_backup_stage() {
     local service_name="$1"
     local repo
-    repo=$(_abf_get_storage_repo) || return "$ABF_EXIT_OK"  # no remote storage configured
+    repo=$(_abf_get_storage_repo) || return "$ABF_EXIT_OK"  # no storage configured
 
     abf_restic_init "$repo" || return 1
     abf_restic_backup "$ABF_STAGING_DIR" "$service_name" || return 1
@@ -382,12 +380,19 @@ abf_validate_config() {
         fi
     done < <(_abf_manifest_lines)
 
-    if [[ "${ABF_STORAGE_BACKEND:-local}" != "local" ]]; then
-        if [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}" ]]; then
-            echo "  [ERROR] Restic password file not found: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
-            errors=$((errors + 1))
-            exit_code="$ABF_EXIT_CONFIG_ERROR"
-        fi
+    # --- Storage module check ---
+    local backend="${ABF_STORAGE_BACKEND:-local}"
+    if [[ ! -f "${ABF_ROOT}/storage/${backend}/module.sh" ]]; then
+        echo "  [ERROR] Storage module not found: storage/${backend}/module.sh"
+        errors=$((errors + 1))
+        exit_code="$ABF_EXIT_CONFIG_ERROR"
+    fi
+
+    # --- Password file check ---
+    if [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}" ]]; then
+        echo "  [ERROR] Restic password file not found: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+        errors=$((errors + 1))
+        exit_code="$ABF_EXIT_CONFIG_ERROR"
     fi
 
     # --- Dependency checks ---
@@ -396,7 +401,7 @@ abf_validate_config() {
         warnings=$((warnings + 1))
     fi
     if ! command -v rclone &>/dev/null; then
-        if [[ "${ABF_STORAGE_BACKEND:-local}" != "local" ]]; then
+        if [[ "$backend" != "local" ]]; then
             echo "  [ERROR] Rclone not installed (required for configured remote storage)"
             errors=$((errors + 1))
             exit_code="$ABF_EXIT_CONFIG_ERROR"

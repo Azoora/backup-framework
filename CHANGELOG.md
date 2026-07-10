@@ -2,7 +2,12 @@
 
 ## 0.1.1-beta (2026-07-10)
 
-### Milestone 3 — Installation & Diagnostics Improvements
+### Milestone 3 — Local Storage Backend, Installation & Diagnostics Improvements
+
+- New `local` storage backend: stores Restic repositories on the local filesystem
+  - Configurable via `STORAGE_LOCAL_REPO_PATH` (default: `/var/backups/abf/restic`)
+  - Supports init, backup, restore, snapshot listing, verification
+- `ABF_STORAGE_BACKEND=local` now works as a proper storage backend (was a no-op pseudo-backend)
 
 - `install.sh`: dependency detection (restic, rclone, sqlite3) with auto-install on Debian/Ubuntu
 - `abf config check`: batch error reporting — all errors reported together with summary

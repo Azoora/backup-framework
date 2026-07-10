@@ -138,9 +138,11 @@ test_validate_config_valid() {
 
     export ABF_LOG_DIR="/tmp"
     export ABF_STORAGE_BACKEND="local"
+    export ABF_RESTIC_PASSWORD_FILE="${PWD}/pwfile"
+    echo "test-pw" > "$ABF_RESTIC_PASSWORD_FILE"
 
     if ! abf_validate_config 2>/dev/null; then
-        echo "  FAIL: Validation should pass for local storage"
+        echo "  FAIL: Validation should pass for local storage with password file"
         return 1
     fi
     return 0
@@ -153,6 +155,8 @@ test_validate_config_outputs_summary() {
 
     export ABF_LOG_DIR="/tmp"
     export ABF_STORAGE_BACKEND="local"
+    export ABF_RESTIC_PASSWORD_FILE="${PWD}/pwfile"
+    echo "test-pw" > "$ABF_RESTIC_PASSWORD_FILE"
 
     local output
     output=$(abf_validate_config 2>/dev/null || true)
@@ -187,6 +191,8 @@ test_validate_config_with_warnings() {
 
     export ABF_LOG_DIR="/tmp"
     export ABF_STORAGE_BACKEND="local"
+    export ABF_RESTIC_PASSWORD_FILE="${PWD}/pwfile"
+    echo "test-pw" > "$ABF_RESTIC_PASSWORD_FILE"
 
     local output
     output=$(abf_validate_config 2>/dev/null || true)

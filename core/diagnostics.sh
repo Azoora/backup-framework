@@ -101,7 +101,7 @@ _abf_diag_check_rclone() {
 _abf_diag_check_repository() {
     local repo
     repo=$(_abf_get_storage_repo 2>/dev/null) || {
-        _abf_diag_result "OK" "repository" "No remote storage configured (local mode)"
+        _abf_diag_result "OK" "repository" "No storage backend configured"
         return 0
     }
 
@@ -123,14 +123,10 @@ _abf_diag_check_repository() {
 
 _abf_diag_check_storage_backend() {
     local backend="${ABF_STORAGE_BACKEND:-local}"
-    if [[ "$backend" == "local" ]]; then
-        _abf_diag_result "OK" "storage_backend" "Storage backend: local"
-        return 0
-    fi
 
     if abf_load_storage_module "$backend" 2>/dev/null \
         && abf_load_storage_config "$backend" 2>/dev/null; then
-        _abf_diag_result "OK" "storage_backend" "Storage module loaded: ${backend}"
+        _abf_diag_result "OK" "storage_backend" "Storage backend: ${backend}"
     else
         _abf_diag_result "ERROR" "storage_backend" "Storage module not found: ${backend}"
     fi
@@ -244,7 +240,7 @@ _abf_diag_check_service_config() {
 _abf_diag_check_backup_age() {
     local repo
     repo=$(_abf_get_storage_repo 2>/dev/null) || {
-        _abf_diag_result "OK" "backup_age" "No remote storage — age check skipped"
+        _abf_diag_result "OK" "backup_age" "No storage backend — age check skipped"
         return 0
     }
 
