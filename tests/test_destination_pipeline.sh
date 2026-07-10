@@ -161,3 +161,62 @@ test_destination_config_validation_invalid() {
 
     return 0
 }
+
+# --- Check command tests ---
+
+test_destination_check_all_no_destinations() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    BACKUP_DESTINATIONS=""
+    export BACKUP_DESTINATIONS
+
+    local output
+    output=$(abf_destination_check_all 2>&1 || true)
+
+    assert_contains "$output" "No destinations configured" "Should show no destinations message"
+    return 0
+}
+
+test_destination_check_all_invalid_destination() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-dest-pipe-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "dest-pipe-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    BACKUP_DESTINATIONS="nonexistent"
+    export BACKUP_DESTINATIONS
+
+    local output
+    output=$(abf_destination_check_all 2>&1 || true)
+
+    assert_contains "$output" "not registered" "Should show not registered message"
+    return 0
+}
+
+test_destination_check_all_local_succeeds() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-dest-pipe-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "dest-pipe-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    BACKUP_DESTINATIONS="local"
+    export BACKUP_DESTINATIONS
+    export LOCAL_DESTINATION_PATH="${tmpdir}/restic"
+
+    local output
+    output=$(abf_destination_check_all 2>&1 || true)
+
+    assert_contains "$output" "Local destination reachable" "Should report local reachable"
+    return 0
+}

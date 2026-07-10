@@ -538,6 +538,50 @@ _abf_sync_destination() {
     fi
 }
 
+# ------------------------------------------------------------------
+# Destination check
+# ------------------------------------------------------------------
+
+abf_destination_check_all() {
+    local dests="${BACKUP_DESTINATIONS:-}"
+    local overall_rc="$ABF_EXIT_OK"
+
+    if [[ -z "$dests" ]]; then
+        echo "No destinations configured."
+        echo "Set BACKUP_DESTINATIONS in abf.conf (e.g. BACKUP_DESTINATIONS=\"local,onedrive\")."
+        return 0
+    fi
+
+    echo "Checking destinations..."
+    echo ""
+
+    IFS=',' read -ra dest_list <<< "$dests"
+    for dest in "${dest_list[@]}"; do
+        dest=$(echo "$dest" | xargs)
+
+        if ! abf_destination_exists "$dest"; then
+            echo "  ✗ '${dest}' is not registered in destinations/manifest.conf"
+            overall_rc="$ABF_EXIT_DESTINATION_ERROR"
+            continue
+        fi
+
+        abf_load_destination_module "$dest" 2>/dev/null || {
+            echo "  ✗ ${dest}: module not found"
+            overall_rc="$ABF_EXIT_DESTINATION_ERROR"
+            continue
+        }
+        abf_load_destination_config "$dest" 2>/dev/null
+
+        if declare -F "destination_check" &>/dev/null; then
+            destination_check || overall_rc="$ABF_EXIT_DESTINATION_ERROR"
+        else
+            echo "  ✓ ${dest} configured"
+        fi
+    done
+
+    return "$overall_rc"
+}
+
 _abf_print_summary() {
     local service_name="$1"
     local backup_rc="$2"

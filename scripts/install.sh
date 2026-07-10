@@ -135,6 +135,7 @@ install -d -m 0755 "${ABF_DST}/cache"
 install -d -m 0755 "${ABF_DST}/logs"
 install -d -m 0755 "${ABF_DST}/temp"
 install -d -m 0755 "${CONFIG_DST}/services"
+install -d -m 0755 "${CONFIG_DST}/destinations"
 install -d -m 0755 /var/log/abf
 install -d -m 0755 /var/cache/abf
 
@@ -212,6 +213,7 @@ copy_default() {
 
 echo "==> Installing configuration..."
 mkdir -p "${CONFIG_DST}/services"
+mkdir -p "${CONFIG_DST}/destinations"
 copy_default "${ABF_SRC}/config/abf.conf"           "${CONFIG_DST}/abf.conf"
 copy_default "${ABF_SRC}/config/storage.conf"        "${CONFIG_DST}/storage.conf"
 copy_default "${ABF_SRC}/config/smtp.conf"           "${CONFIG_DST}/smtp.conf"
@@ -219,6 +221,10 @@ copy_default "${ABF_SRC}/config/services/vaultwarden.conf" \
              "${CONFIG_DST}/services/vaultwarden.conf"
 copy_default "${ABF_SRC}/config/services/immich.conf" \
              "${CONFIG_DST}/services/immich.conf"
+copy_default "${ABF_SRC}/config/destinations/local.conf" \
+             "${CONFIG_DST}/destinations/local.conf"
+copy_default "${ABF_SRC}/config/destinations/onedrive.conf" \
+             "${CONFIG_DST}/destinations/onedrive.conf"
 
 # Run config migration to upgrade any stale default values
 # (e.g. /var/log/abf -> /tmp/abf/logs) left by previous installs.

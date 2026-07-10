@@ -56,15 +56,16 @@ Usage: abf [options] <command> [args]
 Commands:
   backup <service>         Create a backup of the specified service
   restore <service>        Restore the specified service [--snapshot ID]
-                            [--dry-run] [--yes] [--target DIR]
-                            [--components LIST] [--replace-all]
+                             [--dry-run] [--yes] [--target DIR]
+                             [--components LIST] [--replace-all]
   list [service]           List available restic snapshots
-   config check             Validate configuration
-   config migrate           Migrate configuration (upgrade defaults)
+  config check             Validate configuration
+  config migrate           Migrate configuration (upgrade defaults)
+  destination check        Validate configured destinations
   doctor [--json]          Run comprehensive health diagnostics
   schedule install <svc>   Schedule recurring backups
-                            [--frequency daily|weekly|monthly|<cron>]
-                            [--at HH:MM] [--on-day DAY] [--force]
+                             [--frequency daily|weekly|monthly|<cron>]
+                             [--at HH:MM] [--on-day DAY] [--force]
   schedule remove <svc>    Remove a scheduled backup
   schedule status <svc>    Show schedule status for a service
   schedule list            List all scheduled backups
@@ -82,6 +83,7 @@ Examples:
   abf restore vaultwarden --target /tmp/restore-test
   abf restore vaultwarden --components db,config
   abf restore vaultwarden --replace-all
+  abf destination check
   abf schedule install vaultwarden --frequency daily --at 02:00
   abf schedule remove vaultwarden
   abf schedule list
@@ -286,6 +288,18 @@ _abf_main() {
                     ;;
                 *)
                     echo "Usage: abf config {check|migrate}" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        destination)
+            case "${1:-}" in
+                check|"")
+                    shift 2>/dev/null || true
+                    abf_destination_check_all
+                    ;;
+                *)
+                    echo "Usage: abf destination {check}" >&2
                     exit 1
                     ;;
             esac

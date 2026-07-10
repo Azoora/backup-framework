@@ -31,9 +31,28 @@ test_onedrive_destination_defaults() {
     source "${ABF_ROOT}/core/log.sh"
     source "${ABF_ROOT}/destinations/onedrive/module.sh"
 
-    assert_eq "onedrive" "$DESTINATION_ONEDRIVE_REMOTE" "Default remote name"
-    assert_eq "abf-restic-backup" "$DESTINATION_ONEDRIVE_PATH" "Default remote path"
+    assert_eq "OneDrive" "$ONEDRIVE_REMOTE" "Default remote name"
+    assert_eq "Backups/BackupFramework" "$ONEDRIVE_PATH" "Default remote path"
 
+    return 0
+}
+
+test_onedrive_destination_check_fails_without_rclone() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-dest-onedrive-XXXXXX")
+
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/destinations/onedrive/module.sh"
+
+    local real_path="$PATH"
+    export PATH="/dev/null"
+
+    if destination_check 2>/dev/null; then
+        export PATH="$real_path"
+        echo "  FAIL: destination_check should fail without rclone"
+        return 1
+    fi
+    export PATH="$real_path"
     return 0
 }
 
@@ -62,12 +81,12 @@ test_onedrive_destination_fails_without_rclone() {
 test_onedrive_destination_config_is_customizable() {
     source "${ABF_ROOT}/core/log.sh"
 
-    export DESTINATION_ONEDRIVE_REMOTE="myremote"
-    export DESTINATION_ONEDRIVE_PATH="my/custom/path"
+    export ONEDRIVE_REMOTE="myremote"
+    export ONEDRIVE_PATH="my/custom/path"
     source "${ABF_ROOT}/destinations/onedrive/module.sh"
 
-    assert_eq "myremote" "$DESTINATION_ONEDRIVE_REMOTE" "Custom remote name"
-    assert_eq "my/custom/path" "$DESTINATION_ONEDRIVE_PATH" "Custom remote path"
+    assert_eq "myremote" "$ONEDRIVE_REMOTE" "Custom remote name"
+    assert_eq "my/custom/path" "$ONEDRIVE_PATH" "Custom remote path"
 
     return 0
 }

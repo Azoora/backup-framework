@@ -109,3 +109,30 @@ abf config migrate
 
 Running migration multiple times is safe.  Once a value has been updated,
 subsequent runs detect no pending changes and produce no additional backups.
+
+## Per-Destination Configuration
+
+Destination settings live in `/etc/abf/destinations/`. One file per destination:
+
+```
+/etc/abf/destinations/
+├── local.conf        # Local filesystem destination
+└── onedrive.conf     # OneDrive (rclone) destination
+```
+
+### File: `destinations/local.conf`
+
+```bash
+# Local path to sync the Restic repository to (e.g. Umbrel SSD)
+LOCAL_DESTINATION_PATH="/mnt/umbrel/backups/restic"
+```
+
+### File: `destinations/onedrive.conf`
+
+```bash
+# Name of the rclone remote (configured via "rclone config")
+ONEDRIVE_REMOTE="OneDrive"
+
+# Path within the remote where backups will be stored
+ONEDRIVE_PATH="Backups/BackupFramework"
+```

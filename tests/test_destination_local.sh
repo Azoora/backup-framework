@@ -27,6 +27,43 @@ test_local_destination_name() {
     assert_eq "Local" "$name" "Destination display name"
 }
 
+test_local_destination_check_succeeds() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-dest-local-XXXXXX")
+
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/destinations/local/module.sh"
+
+    export LOCAL_DESTINATION_PATH="${tmpdir}/dest-repo"
+    mkdir -p "$tmpdir"
+
+    if ! destination_check; then
+        echo "  FAIL: destination_check should succeed for writable path"
+        return 1
+    fi
+    return 0
+}
+
+test_local_destination_check_fails_on_readonly_parent() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-dest-local-XXXXXX")
+
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/destinations/local/module.sh"
+
+    local dest_parent="${tmpdir}/readonly"
+    mkdir -p "$dest_parent"
+    chmod 0444 "$dest_parent"
+
+    export LOCAL_DESTINATION_PATH="${dest_parent}/restic"
+
+    if destination_check 2>/dev/null; then
+        echo "  FAIL: destination_check should fail on read-only parent"
+        return 1
+    fi
+    return 0
+}
+
 test_local_destination_sync_creates_dest_dir() {
     local tmpdir
     tmpdir=$(mktemp -d -t "abf-test-dest-local-XXXXXX")
@@ -41,7 +78,7 @@ test_local_destination_sync_creates_dest_dir() {
     mkdir -p "${src_repo}/index" "${src_repo}/snapshots" "${src_repo}/data"
     echo "test-data" > "${src_repo}/index/test"
 
-    export DESTINATION_LOCAL_PATH="${tmpdir}/dest-repo/restic"
+    export LOCAL_DESTINATION_PATH="${tmpdir}/dest-repo/restic"
     source "${ABF_ROOT}/destinations/local/module.sh"
 
     if ! destination_sync "$src_repo"; then
@@ -70,7 +107,7 @@ test_local_destination_sync_fails_on_missing_source() {
     source "${ABF_ROOT}/core/log.sh"
     abf_init_logging "local-dest-test" "test" "${tmpdir}/logs"
 
-    export DESTINATION_LOCAL_PATH="${tmpdir}/dest-repo"
+    export LOCAL_DESTINATION_PATH="${tmpdir}/dest-repo"
     source "${ABF_ROOT}/destinations/local/module.sh"
 
     if destination_sync "/nonexistent/path" 2>/dev/null; then
@@ -96,7 +133,7 @@ test_local_destination_sync_fails_on_readonly_dest() {
     mkdir -p "$dest_parent"
     chmod 0444 "$dest_parent"
 
-    export DESTINATION_LOCAL_PATH="${dest_parent}/restic"
+    export LOCAL_DESTINATION_PATH="${dest_parent}/restic"
     source "${ABF_ROOT}/destinations/local/module.sh"
 
     if destination_sync "$src_repo" 2>/dev/null; then
@@ -114,7 +151,7 @@ test_local_destination_skips_remote_source() {
     source "${ABF_ROOT}/core/log.sh"
     abf_init_logging "local-dest-test" "test" "${tmpdir}/logs"
 
-    export DESTINATION_LOCAL_PATH="${tmpdir}/dest-repo"
+    export LOCAL_DESTINATION_PATH="${tmpdir}/dest-repo"
     source "${ABF_ROOT}/destinations/local/module.sh"
 
     if destination_sync "rclone:remote:path" 2>/dev/null; then
@@ -128,7 +165,7 @@ test_local_destination_default_path_is_umbrel_mount() {
     source "${ABF_ROOT}/core/log.sh"
     source "${ABF_ROOT}/destinations/local/module.sh"
 
-    local default_path="$DESTINATION_LOCAL_PATH"
+    local default_path="$LOCAL_DESTINATION_PATH"
     assert_contains "$default_path" "/mnt/umbrel" "Default path targets Umbrel mount"
 
     return 0
@@ -148,7 +185,7 @@ test_local_destination_sync_preserves_files() {
     mkdir -p "${src_repo}/index"
     echo "index-data" > "${src_repo}/index/test"
 
-    export DESTINATION_LOCAL_PATH="${tmpdir}/dest-repo"
+    export LOCAL_DESTINATION_PATH="${tmpdir}/dest-repo"
     source "${ABF_ROOT}/destinations/local/module.sh"
 
     destination_sync "$src_repo" || {

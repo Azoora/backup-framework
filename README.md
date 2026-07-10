@@ -276,6 +276,12 @@ abf list                # all snapshots
 abf list vaultwarden    # snapshots for a specific service
 ```
 
+### Destination Validation
+
+```bash
+abf destination check   # validate all configured destinations
+```
+
 ### Config Validation
 
 ```bash
