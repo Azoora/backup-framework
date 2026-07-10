@@ -32,6 +32,8 @@ source "${ABF_ROOT}/core/notify.sh"
 source "${ABF_ROOT}/core/retention.sh"
 # shellcheck source=core/lock.sh
 source "${ABF_ROOT}/core/lock.sh"
+# shellcheck source=core/scheduler.sh
+source "${ABF_ROOT}/core/scheduler.sh"
 # shellcheck source=core/core.sh
 source "${ABF_ROOT}/core/core.sh"
 
@@ -46,10 +48,14 @@ _abf_show_help() {
 Usage: abf [options] <command> [args]
 
 Commands:
-  backup <service>       Create a backup of the specified service
-  restore <service>      Restore the specified service from a backup
-  list [service]         List available restic snapshots
-  config check           Validate configuration
+  backup <service>         Create a backup of the specified service
+  restore <service>        Restore the specified service from a backup
+  list [service]           List available restic snapshots
+  config check             Validate configuration
+  schedule install <svc>   Schedule recurring backups
+  schedule remove <svc>    Remove a scheduled backup
+  schedule status <svc>    Show schedule status for a service
+  schedule list            List all scheduled backups
 
 Options:
   --config DIR           Use an alternative configuration directory
@@ -60,8 +66,9 @@ Options:
 Examples:
   abf backup vaultwarden
   abf restore vaultwarden --dry-run
-  abf list
-  abf config check
+  abf schedule install vaultwarden --frequency daily --at 02:00
+  abf schedule remove vaultwarden
+  abf schedule list
 EOF
 }
 
@@ -220,6 +227,56 @@ _abf_main() {
                 exit 1
             fi
             _abf_cmd_config_check
+            ;;
+        schedule)
+            local subcommand="${1:-}"
+
+            case "$subcommand" in
+                install)
+                    if [[ $# -lt 2 ]]; then
+                        echo "Usage: abf schedule install <service> [options]" >&2
+                        echo "  --frequency daily|weekly|monthly|<cron>" >&2
+                        echo "  --at HH:MM" >&2
+                        echo "  --on-day DAY (0=Sun for weekly, 1-31 for monthly)" >&2
+                        echo "  --force" >&2
+                        exit 1
+                    fi
+                    shift
+                    local svc="$1"; shift
+                    local freq="daily" time="03:00" day="0" force="false"
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --frequency) freq="$2"; shift 2 ;;
+                            --at)        time="$2"; shift 2 ;;
+                            --on-day)    day="$2";  shift 2 ;;
+                            --force)     force="true"; shift ;;
+                            *)           break ;;
+                        esac
+                    done
+                    abf_schedule_install "$svc" "$freq" "$time" "$day" "$force"
+                    ;;
+                remove)
+                    if [[ $# -lt 2 ]]; then
+                        echo "Usage: abf schedule remove <service>" >&2
+                        exit 1
+                    fi
+                    abf_schedule_remove "$2"
+                    ;;
+                status)
+                    if [[ $# -lt 2 ]]; then
+                        echo "Usage: abf schedule status <service>" >&2
+                        exit 1
+                    fi
+                    abf_schedule_status "$2"
+                    ;;
+                list)
+                    abf_schedule_list
+                    ;;
+                *)
+                    echo "Usage: abf schedule install|remove|status|list" >&2
+                    exit 1
+                    ;;
+            esac
             ;;
         *)
             echo "Unknown command: ${command}" >&2
