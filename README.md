@@ -96,7 +96,7 @@ service_post_restore   →  Clean up staging
 ## Quick Start
 
 ```bash
-# Install
+# Install (copies framework to /opt/abf, creates /usr/local/bin/abf wrapper)
 sudo ./scripts/install.sh
 
 # Validate
@@ -114,6 +114,10 @@ sudo abf restore vaultwarden --dry-run
 # Health check
 sudo abf doctor
 ```
+
+**Two modes:** `./abf` works from a git checkout (development).  
+After `install.sh`, the `abf` command works system-wide (production).  
+Both modes use the same code — only the install layout differs.
 
 ---
 
@@ -136,18 +140,56 @@ cd /opt/abf
 sudo ./scripts/install.sh
 ```
 
-The installer creates `/etc/abf/`, installs the `abf` command to `/usr/local/bin/`, and copies default configuration files (without overwriting existing ones).
+The installer:
+<br>- Copies the full framework to `/opt/abf/`
+<br>- Creates a lightweight wrapper at `/usr/local/bin/abf` that execs `/opt/abf/abf`
+<br>- Copies default configuration to `/etc/abf/` (without overwriting existing files)
+</br>
+```bash
+# Source layout (development)
+git checkout/
+├── abf              # full launcher
+├── core/            # engine modules
+├── services/        # service plugins
+└── storage/         # storage plugins
+
+# Installed layout (production)
+/opt/abf/
+├── abf              # full launcher
+├── core/
+├── services/
+├── storage/
+└── ...
+
+/usr/local/bin/abf   # lightweight wrapper → exec /opt/abf/abf
+```
 
 ### Manual Install
 
 ```bash
-sudo mkdir -p /etc/abf/services /var/log/abf /var/cache/abf
-sudo cp abf /usr/local/bin/abf
+# Deploy framework
+sudo mkdir -p /opt/abf
+sudo cp -r abf core services storage scripts tests docs examples \
+         VERSION CHANGELOG.md LICENSE README.md /opt/abf/
+sudo chmod +x /opt/abf/abf
+
+# Create wrapper
+printf '#!/usr/bin/env bash\nexec /opt/abf/abf "$@"\n' \
+  | sudo tee /usr/local/bin/abf >/dev/null
 sudo chmod +x /usr/local/bin/abf
+
+# Configuration
+sudo mkdir -p /etc/abf/services /var/log/abf /var/cache/abf
 sudo cp config/abf.conf /etc/abf/
 sudo cp config/storage.conf /etc/abf/
 sudo cp config/smtp.conf /etc/abf/
 sudo cp config/services/vaultwarden.conf /etc/abf/services/
+```
+
+### Uninstall
+
+```bash
+sudo bash /opt/abf/scripts/uninstall.sh
 ```
 
 ---

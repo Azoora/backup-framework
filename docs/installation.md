@@ -3,51 +3,94 @@
 ## Requirements
 
 - Bash 4.0 or later
-- `tar` (for archive creation)
+- `restic` (recommended for encrypted backups; install from [restic.net](https://restic.net))
+- `rclone` (required for OneDrive storage; `apt install rclone` or [rclone.org](https://rclone.org))
 - `sqlite3` (recommended for consistent SQLite backups; falls back to `cp`)
+- `crontab` or `systemd` (for scheduling; auto-detected)
 
-## Quick Install
+## Automated Install
 
 ```bash
 git clone <repository-url> /opt/abf
 cd /opt/abf
-./scripts/install.sh
+sudo ./scripts/install.sh
 ```
+
+The installer:
+
+1. Copies the full framework to `/opt/abf/`
+2. Creates a lightweight wrapper at `/usr/local/bin/abf` that execs `/opt/abf/abf`
+3. Copies default configuration to `/etc/abf/` (never overwrites existing files)
+4. Creates runtime directories (`/var/log/abf`, `/var/cache/abf`)
 
 ## Manual Install
 
 ```bash
-# Create directories
-sudo mkdir -p /etc/abf/services
-sudo mkdir -p /var/log/abf
-sudo mkdir -p /var/backups
+# Deploy framework
+sudo mkdir -p /opt/abf
+sudo cp -r abf core services storage scripts tests docs examples VERSION \
+         CHANGELOG.md LICENSE README.md /opt/abf/
+sudo chmod +x /opt/abf/abf
 
-# Copy configuration
+# Create wrapper
+printf '#!/usr/bin/env bash\nexec /opt/abf/abf "$@"\n' \
+  | sudo tee /usr/local/bin/abf >/dev/null
+sudo chmod +x /usr/local/bin/abf
+
+# Configuration
+sudo mkdir -p /etc/abf/services /var/log/abf /var/cache/abf
 sudo cp config/abf.conf /etc/abf/
 sudo cp config/storage.conf /etc/abf/
+sudo cp config/smtp.conf /etc/abf/
 sudo cp config/services/vaultwarden.conf /etc/abf/services/
-
-# Install the abf command
-sudo cp abf /usr/local/bin/abf
-sudo chmod +x /usr/local/bin/abf
 
 # Verify
 abf config check
 ```
 
+## Install Layout
+
+```
+# Development mode (git checkout)
+checkout/
+├── abf              # full launcher (ABF_ROOT = checkout/)
+├── core/
+├── services/
+├── storage/
+└── ...
+
+# Installed mode (production)
+/opt/abf/
+├── abf              # full launcher (ABF_ROOT = /opt/abf/)
+├── core/
+├── services/
+├── storage/
+└── ...
+
+/usr/local/bin/abf   # lightweight wrapper (2 lines, no framework logic)
+```
+
+Both modes use identical code. `ABF_ROOT` is computed from the launcher's own location, so it resolves correctly in either layout.
+
 ## Configuration
 
 Edit the configuration files in `/etc/abf/`:
 
-- `abf.conf` -- Framework settings (log directory, temp directory)
-- `services/vaultwarden.conf` -- Vaultwarden paths and component selection
+- `abf.conf` — Framework settings (log directory, storage backend, retention)
+- `storage.conf` — Storage backend defaults
+- `smtp.conf` — SMTP notification settings
+- `services/vaultwarden.conf` — Vaultwarden paths and component selection
 
 See the [Configuration Guide](configuration.md) for details.
 
 ## Uninstall
 
 ```bash
-sudo rm /usr/local/bin/abf
-sudo rm -rf /etc/abf
-sudo rm -rf /var/log/abf
+sudo bash /opt/abf/scripts/uninstall.sh
 ```
+
+The uninstaller:
+1. Removes `/usr/local/bin/abf` (only if it matches the known wrapper)
+2. Removes `/opt/abf/`
+3. Removes `/var/log/abf` and `/var/cache/abf`
+4. Prompts before removing `/etc/abf/` (preserves custom configuration)
