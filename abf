@@ -30,6 +30,8 @@ source "${ABF_ROOT}/core/restic.sh"
 source "${ABF_ROOT}/core/notify.sh"
 # shellcheck source=core/retention.sh
 source "${ABF_ROOT}/core/retention.sh"
+# shellcheck source=core/lock.sh
+source "${ABF_ROOT}/core/lock.sh"
 # shellcheck source=core/core.sh
 source "${ABF_ROOT}/core/core.sh"
 

@@ -142,6 +142,11 @@ abf_run_backup() {
 
     abf_log_info "Starting backup for service: ${service_name}"
 
+    # Acquire lock -- prevents concurrent backups
+    abf_lock_init
+    abf_lock_acquire "$service_name" || return "$ABF_EXIT_LOCK_ERROR"
+    trap 'abf_lock_release "$service_name"' EXIT
+
     abf_load_service_module "$service_name" || return "$ABF_EXIT_SERVICE_NOT_FOUND"
     abf_load_service_config "$service_name"
     _abf_call_optional service_healthcheck "backup"
