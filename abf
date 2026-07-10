@@ -36,6 +36,8 @@ source "${ABF_ROOT}/core/lock.sh"
 source "${ABF_ROOT}/core/scheduler.sh"
 # shellcheck source=core/diagnostics.sh
 source "${ABF_ROOT}/core/diagnostics.sh"
+# shellcheck source=core/migrate.sh
+source "${ABF_ROOT}/core/migrate.sh"
 # shellcheck source=core/core.sh
 source "${ABF_ROOT}/core/core.sh"
 
@@ -53,7 +55,8 @@ Commands:
   backup <service>         Create a backup of the specified service
   restore <service>        Restore the specified service from a backup
   list [service]           List available restic snapshots
-  config check             Validate configuration
+   config check             Validate configuration
+   config migrate           Migrate configuration (upgrade defaults)
   doctor [--json]          Run comprehensive health diagnostics
   schedule install <svc>   Schedule recurring backups
                            [--frequency daily|weekly|monthly|<cron>]
@@ -229,11 +232,19 @@ _abf_main() {
             _abf_cmd_list "${1:-}"
             ;;
         config)
-            if [[ "${1:-}" != "check" ]]; then
-                echo "Usage: abf config check" >&2
-                exit 1
-            fi
-            _abf_cmd_config_check
+            case "${1:-}" in
+                check|"")
+                    _abf_cmd_config_check
+                    ;;
+                migrate)
+                    shift
+                    abf_config_migrate
+                    ;;
+                *)
+                    echo "Usage: abf config {check|migrate}" >&2
+                    exit 1
+                    ;;
+            esac
             ;;
         doctor)
             local json_mode="false"

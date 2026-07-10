@@ -82,7 +82,9 @@ _abf_write_machine() {
     local escaped
     escaped=$(printf '%s' "$message" | sed 's/"/\\"/g')
 
-    printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
-        "$timestamp" "$level" "$escaped" \
-        >> "$ABF_LOG_JSON_FILE" 2>/dev/null || true
+    if [[ -n "${ABF_LOG_JSON_FILE:-}" ]]; then
+        printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
+            "$timestamp" "$level" "$escaped" \
+            >> "$ABF_LOG_JSON_FILE" 2>/dev/null || true
+    fi
 }

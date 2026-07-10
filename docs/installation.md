@@ -85,6 +85,78 @@ Edit the configuration files in `/etc/abf/`:
 
 See the [Configuration Guide](configuration.md) for details.
 
+## Upgrading
+
+Re-run the installer to upgrade:
+
+```bash
+sudo ./scripts/install.sh
+```
+
+The installer:
+
+1. Replaces all framework files in `/opt/abf/`
+2. Preserves your existing configuration (never overwrites modified files)
+3. Runs **config migration** to upgrade any stale default values
+4. Existing customized values are never touched
+
+### Config Migration
+
+When upgrading from a previous version, the installer automatically detects
+config values that still carry old defaults and updates them to the current
+standard.  Before making any changes, it creates a timestamped backup:
+
+```
+/etc/abf/backup/20260710-020000/
+├── abf.conf
+├── storage.conf
+├── smtp.conf
+└── services/
+    └── vaultwarden.conf
+```
+
+You can also run migration manually at any time:
+
+```bash
+abf config migrate
+```
+
+Migration only touches values that exactly match a known old default.
+If you have customized a value, it is left unchanged.
+
+### Migration Examples
+
+| Variable | Old Default | New Default |
+|---|---|---|
+| `ABF_LOG_DIR` | `/var/log/abf` | `/tmp/abf/logs` |
+| `ABF_CACHE_DIR` | `/var/cache/abf` | `/tmp/abf/cache` |
+| `SERVICE_VAULTWARDEN_BACKUP_DIR` | `/var/backups/abf/vaultwarden` | `/tmp/abf/vaultwarden` |
+
+## Privilege Requirements
+
+Backup and restore operations require read access to:
+
+- The **restic password file** (`/etc/abf/restic-password`)
+- The **service data directory** (e.g. `/var/lib/vaultwarden`)
+
+Both are typically owned by `root`.  Before starting a backup or restore,
+the framework checks that the current user can read these paths.  If not,
+it fails immediately with a clear message:
+
+```
+ERROR: Cannot read restic password file: /etc/abf/restic-password
+ERROR: Backup requires elevated privileges.
+
+  Run: sudo abf backup vaultwarden
+```
+
+Run all backup and restore commands with `sudo`:
+
+```bash
+sudo abf backup vaultwarden
+sudo abf restore vaultwarden
+```
+
 ## Uninstall
 
 ```bash

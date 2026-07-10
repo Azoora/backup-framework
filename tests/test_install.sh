@@ -254,6 +254,242 @@ test_install_files_contain_latest_code() {
     return 0
 }
 
+# ------------------------------------------------------------------
+# Upgrade & migration tests
+# ------------------------------------------------------------------
+
+test_upgrade_migrates_old_defaults() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local cfg="${tmpdir}/etc/abf"
+    mkdir -p "${cfg}/services"
+
+    # Create config with old defaults (as shipped by a previous install)
+    cat > "${cfg}/abf.conf" <<'EOF'
+ABF_LOG_DIR="/var/log/abf"
+ABF_CACHE_DIR="/var/cache/abf"
+ABF_TEMP_DIR="/tmp/abf"
+ABF_RESTIC_PASSWORD_FILE="/etc/abf/restic-password"
+EOF
+
+    # Source migration module and run
+    source "${ABF_ROOT}/core/migrate.sh"
+    ABF_CONFIG_DIR="$cfg" abf_config_migrate
+
+    # Verify old defaults were migrated
+    local log_dir cache_dir
+    log_dir=$(grep -E '^ABF_LOG_DIR=' "${cfg}/abf.conf" | sed 's/.*="//;s/"$//')
+    cache_dir=$(grep -E '^ABF_CACHE_DIR=' "${cfg}/abf.conf" | sed 's/.*="//;s/"$//')
+
+    assert_eq "/tmp/abf/logs" "$log_dir" "ABF_LOG_DIR migrated to new default"
+    assert_eq "/tmp/abf/cache" "$cache_dir" "ABF_CACHE_DIR migrated to new default"
+
+    return 0
+}
+
+test_upgrade_preserves_customized_values() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local cfg="${tmpdir}/etc/abf"
+    mkdir -p "${cfg}/services"
+
+    # Create config where user already customized the value (not old default)
+    cat > "${cfg}/abf.conf" <<'EOF'
+ABF_LOG_DIR="/custom/log/path"
+ABF_CACHE_DIR="/tmp/abf/cache"
+EOF
+
+    # Run migration
+    source "${ABF_ROOT}/core/migrate.sh"
+    ABF_CONFIG_DIR="$cfg" abf_config_migrate
+
+    # Verify customized value was NOT changed
+    local log_dir
+    log_dir=$(grep -E '^ABF_LOG_DIR=' "${cfg}/abf.conf" | sed 's/.*="//;s/"$//')
+    assert_eq "/custom/log/path" "$log_dir" "Customized ABF_LOG_DIR preserved"
+
+    # Verify the non-customized value WAS migrated (old default matched)
+    local cache_dir
+    cache_dir=$(grep -E '^ABF_CACHE_DIR=' "${cfg}/abf.conf" | sed 's/.*="//;s/"$//')
+    assert_eq "/tmp/abf/cache" "$cache_dir" "Default ABF_CACHE_DIR untouched (already /tmp/abf/cache)"
+
+    return 0
+}
+
+test_upgrade_creates_backup_before_migration() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local cfg="${tmpdir}/etc/abf"
+    mkdir -p "${cfg}/services"
+
+    cat > "${cfg}/abf.conf" <<'EOF'
+ABF_LOG_DIR="/var/log/abf"
+EOF
+
+    source "${ABF_ROOT}/core/migrate.sh"
+    ABF_CONFIG_DIR="$cfg" abf_config_migrate
+
+    # Verify backup directory was created
+    local backup_dirs
+    backup_dirs=$(find "${cfg}/backup" -maxdepth 1 -type d 2>/dev/null | wc -l)
+
+    if [[ "$backup_dirs" -lt 2 ]]; then
+        echo "  FAIL: No backup directory found in ${cfg}/backup"
+        return 1
+    fi
+
+    # Verify the backup contains the original config
+    local backup_file
+    backup_file=$(find "${cfg}/backup" -name "abf.conf" 2>/dev/null | head -1)
+    if [[ -z "$backup_file" ]]; then
+        echo "  FAIL: Backup does not contain abf.conf"
+        return 1
+    fi
+
+    # Verify backup has the OLD value before migration
+    local old_val
+    old_val=$(grep -E '^ABF_LOG_DIR=' "$backup_file" | sed 's/.*="//;s/"$//')
+    assert_eq "/var/log/abf" "$old_val" "Backup contains original value before migration"
+
+    return 0
+}
+
+test_upgrade_idempotent() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local cfg="${tmpdir}/etc/abf"
+    mkdir -p "${cfg}/services"
+
+    cat > "${cfg}/abf.conf" <<'EOF'
+ABF_LOG_DIR="/var/log/abf"
+EOF
+
+    source "${ABF_ROOT}/core/migrate.sh"
+    ABF_CONFIG_DIR="$cfg" abf_config_migrate
+    local backup_count_1
+    backup_count_1=$(find "${cfg}/backup" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+
+    # Run migration again
+    ABF_CONFIG_DIR="$cfg" abf_config_migrate
+
+    # Verify no new backup was created
+    local backup_count_2
+    backup_count_2=$(find "${cfg}/backup" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    assert_eq "$backup_count_1" "$backup_count_2" "No additional backup on second run"
+
+    # Verify value is still correct
+    local log_dir
+    log_dir=$(grep -E '^ABF_LOG_DIR=' "${cfg}/abf.conf" | sed 's/.*="//;s/"$//')
+    assert_eq "/tmp/abf/logs" "$log_dir" "Value unchanged after second migration run"
+
+    # Verify output says "No migrations needed"
+    local output
+    output=$(ABF_CONFIG_DIR="$cfg" abf_config_migrate 2>&1)
+    assert_contains "$output" "No migrations needed" "Second run reports no migrations"
+
+    return 0
+}
+
+test_upgrade_info_printed_in_summary() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local cfg="${tmpdir}/etc/abf"
+    mkdir -p "${cfg}/services"
+
+    cat > "${cfg}/abf.conf" <<'EOF'
+ABF_LOG_DIR="/var/log/abf"
+ABF_CACHE_DIR="/var/cache/abf"
+EOF
+
+    source "${ABF_ROOT}/core/migrate.sh"
+    local output
+    output=$(ABF_CONFIG_DIR="$cfg" abf_config_migrate 2>&1)
+
+    assert_contains "$output" "Backup created" "Summary mentions backup"
+    assert_contains "$output" "Migrated 2 value" "Summary reports change count"
+    assert_contains "$output" "ABF_LOG_DIR" "Summary lists migrated variable"
+    assert_contains "$output" "ABF_CACHE_DIR" "Summary lists migrated variable"
+    assert_contains "$output" "/var/log/abf" "Summary shows old value"
+    assert_contains "$output" "/tmp/abf/logs" "Summary shows new value"
+
+    return 0
+}
+
+test_upgrade_vaultwarden_backup_dir() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local cfg="${tmpdir}/etc/abf"
+    mkdir -p "${cfg}/services"
+
+    cat > "${cfg}/services/vaultwarden.conf" <<'EOF'
+SERVICE_VAULTWARDEN_BACKUP_DIR="/var/backups/abf/vaultwarden"
+EOF
+
+    source "${ABF_ROOT}/core/migrate.sh"
+    ABF_CONFIG_DIR="$cfg" abf_config_migrate
+
+    local dir
+    dir=$(grep -E '^SERVICE_VAULTWARDEN_BACKUP_DIR=' "${cfg}/services/vaultwarden.conf" | sed 's/.*="//;s/"$//')
+    assert_eq "/tmp/abf/vaultwarden" "$dir" "Vaultwarden backup dir migrated"
+
+    return 0
+}
+
+test_upgrade_privilege_check_detects_unreadable_password_file() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+
+    local pw_file="${tmpdir}/restic-password"
+    echo "test-password" > "$pw_file"
+    chmod 000 "$pw_file"
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    export ABF_RESTIC_PASSWORD_FILE="$pw_file"
+
+    local output
+    output=$(_abf_check_backup_privileges "test" 2>&1 || true)
+
+    chmod 644 "$pw_file"
+    unset ABF_RESTIC_PASSWORD_FILE
+
+    assert_contains "$output" "Cannot read restic password file" "Error includes password file path"
+    assert_contains "$output" "sudo abf backup" "Error suggests sudo"
+
+    return 0
+}
+
+test_upgrade_privilege_check_passes_when_readable() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+
+    local pw_file="${tmpdir}/restic-password"
+    echo "test-password" > "$pw_file"
+    chmod 644 "$pw_file"
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    export ABF_RESTIC_PASSWORD_FILE="$pw_file"
+
+    _abf_check_backup_privileges "test" 2>/dev/null
+
+    local rc=$?
+
+    chmod 644 "$pw_file"
+    unset ABF_RESTIC_PASSWORD_FILE
+
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL: Privilege check should pass for readable password file"
+        return 1
+    fi
+
+    return 0
+}
+
 test_install_sources_version_file() {
     # Verify install.sh references VERSION (the framework version, not install.sh version)
     local install="${ABF_ROOT}/scripts/install.sh"

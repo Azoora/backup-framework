@@ -157,6 +157,15 @@ abf_run_backup() {
     abf_load_service_config "$service_name"
     _abf_call_optional service_healthcheck "backup"
 
+    # ----- privilege check -----
+    _abf_check_backup_privileges "$service_name" || {
+        rc="$ABF_EXIT_CONFIG_ERROR"
+        _abf_call_optional service_cleanup "backup"
+        _abf_notify_result "$rc" "$service_name"
+        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
+        return "$rc"
+    }
+
     # ----- pre-backup -----
     service_pre_backup || {
         rc="$ABF_EXIT_BACKUP_FAILED"
@@ -241,6 +250,9 @@ abf_run_restore() {
     abf_load_service_config "$service_name"
     _abf_call_optional service_healthcheck "restore"
 
+    # ----- privilege check -----
+    _abf_check_backup_privileges "$service_name" || return "$ABF_EXIT_CONFIG_ERROR"
+
     service_pre_restore "$snapshot" "$dry_run" || {
         rc="$ABF_EXIT_RESTORE_FAILED"
         service_post_restore
@@ -312,7 +324,8 @@ abf_list_snapshots() {
 
 _abf_svc_var_prefix() {
     local name="$1"
-    echo "SERVICE_$(echo "$name" | tr '[:lower:]' '[:upper:]')"
+    # Replace hyphens with underscores so the prefix forms a valid bash variable name
+    echo "SERVICE_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
 }
 
 _abf_get_storage_repo() {
@@ -361,6 +374,43 @@ _abf_notify_result() {
     fi
 
     abf_notify_send "$status" "$service_name" "$details" || true
+}
+
+# ------------------------------------------------------------------
+# Privilege detection
+# ------------------------------------------------------------------
+
+_abf_check_backup_privileges() {
+    local service_name="$1"
+    local errors=0
+
+    # Check restic password file is readable
+    local pw_file="${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+    if [[ -n "$pw_file" ]]; then
+        if [[ -e "$pw_file" && ! -r "$pw_file" ]]; then
+            abf_log_error "Cannot read restic password file: ${pw_file}"
+            ((errors++))
+        fi
+    fi
+
+    # Check service data directory is readable
+    local prefix
+    prefix=$(_abf_svc_var_prefix "$service_name")
+    local data_dir_var="${prefix}_DATA_DIR"
+    local data_dir="${!data_dir_var:-}"
+    if [[ -n "$data_dir" ]] && [[ -e "$data_dir" && ! -r "$data_dir" ]]; then
+        abf_log_error "Cannot read service data directory: ${data_dir}"
+        ((errors++))
+    fi
+
+    if [[ $errors -gt 0 ]]; then
+        abf_log_error "Backup requires elevated privileges."
+        echo ""
+        echo "  Run: sudo abf backup ${service_name}"
+        return 1
+    fi
+
+    return 0
 }
 
 # ------------------------------------------------------------------
