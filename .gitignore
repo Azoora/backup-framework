@@ -1,0 +1,16 @@
+# Runtime directories
+logs/*
+cache/*
+temp/*
+!.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Test
+.pytest_cache/

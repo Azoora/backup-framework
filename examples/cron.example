@@ -1,0 +1,3 @@
+# Daily backup at 2 AM
+# Add to crontab with: crontab -e
+0 2 * * * /usr/local/bin/abf backup vaultwarden >> /var/log/abf/cron.log 2>&1

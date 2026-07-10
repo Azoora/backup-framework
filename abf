@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# abf  --  Backup Framework CLI
+#
+# Flat command structure:
+#   abf backup   <service>     Create a backup
+#   abf restore  <service>     Restore from backup
+#   abf list     [service]     List available backups
+#   abf config   check         Validate configuration
+#
+# Per spec coding standard:
+set -Eeuo pipefail
+# ---------------------------------------------------------------------------
+
+ABF_ROOT="$(cd "$(dirname "$0")" && pwd)"
+export ABF_ROOT
+
+# ------------------------------------------------------------------
+# Bootstrap
+# ------------------------------------------------------------------
+# shellcheck source=core/exit_codes.sh
+source "${ABF_ROOT}/core/exit_codes.sh"
+# shellcheck source=core/log.sh
+source "${ABF_ROOT}/core/log.sh"
+# shellcheck source=core/config.sh
+source "${ABF_ROOT}/core/config.sh"
+# shellcheck source=core/restic.sh
+source "${ABF_ROOT}/core/restic.sh"
+# shellcheck source=core/notify.sh
+source "${ABF_ROOT}/core/notify.sh"
+# shellcheck source=core/retention.sh
+source "${ABF_ROOT}/core/retention.sh"
+# shellcheck source=core/core.sh
+source "${ABF_ROOT}/core/core.sh"
+
+ABF_VERSION="$(cat "${ABF_ROOT}/VERSION" 2>/dev/null || echo "unknown")"
+
+# ------------------------------------------------------------------
+# Help text
+# ------------------------------------------------------------------
+
+_abf_show_help() {
+    cat <<EOF
+Usage: abf [options] <command> [args]
+
+Commands:
+  backup <service>       Create a backup of the specified service
+  restore <service>      Restore the specified service from a backup
+  list [service]         List available restic snapshots
+  config check           Validate configuration
+
+Options:
+  --config DIR           Use an alternative configuration directory
+  --verbose, -v          Enable debug logging (includes restic output)
+  --version              Show version information
+  --help, -h             Show this help message
+
+Examples:
+  abf backup vaultwarden
+  abf restore vaultwarden --dry-run
+  abf list
+  abf config check
+EOF
+}
+
+# ------------------------------------------------------------------
+# Command: backup
+# ------------------------------------------------------------------
+
+_abf_cmd_backup() {
+    local service_name="$1"
+    local log_dir="${ABF_LOG_DIR:-/var/log/abf}"
+
+    abf_init_logging "$service_name" "backup" "$log_dir"
+    abf_log_info "=== Backup Framework v${ABF_VERSION} ==="
+
+    if ! abf_service_exists "$service_name"; then
+        abf_log_error "Unknown service: ${service_name}"
+        echo "Available services:" >&2
+        abf_list_services >&2
+        return "$ABF_EXIT_SERVICE_NOT_FOUND"
+    fi
+
+    abf_run_backup "$service_name"
+}
+
+# ------------------------------------------------------------------
+# Command: restore
+# ------------------------------------------------------------------
+
+_abf_cmd_restore() {
+    local service_name="$1"
+    local snapshot="${2:-}"
+    local dry_run="${3:-false}"
+    local log_dir="${ABF_LOG_DIR:-/var/log/abf}"
+
+    abf_init_logging "$service_name" "restore" "$log_dir"
+    abf_log_info "=== Backup Framework v${ABF_VERSION} ==="
+
+    if ! abf_service_exists "$service_name"; then
+        abf_log_error "Unknown service: ${service_name}"
+        echo "Available services:" >&2
+        abf_list_services >&2
+        return "$ABF_EXIT_SERVICE_NOT_FOUND"
+    fi
+
+    if [[ -z "$snapshot" ]] && [[ "$dry_run" != "true" ]]; then
+        abf_load_service_config "$service_name"
+        local repo
+        repo=$(_abf_get_storage_repo) || {
+            abf_log_error "No storage configured -- cannot determine latest snapshot"
+            return "$ABF_EXIT_RESTORE_FAILED"
+        }
+        abf_restic_init "$repo"
+        local latest
+        latest=$(abf_restic_get_latest_snapshot "$service_name")
+        if [[ -z "$latest" ]]; then
+            abf_log_error "No snapshots found for ${service_name}"
+            return "$ABF_EXIT_RESTORE_FAILED"
+        fi
+        snapshot="$latest"
+        abf_log_info "Auto-selected latest snapshot: ${snapshot}"
+    fi
+
+    abf_run_restore "$service_name" "$snapshot" "$dry_run"
+}
+
+# ------------------------------------------------------------------
+# Command: list
+# ------------------------------------------------------------------
+
+_abf_cmd_list() {
+    local service_name="${1:-}"
+
+    if [[ -n "$service_name" ]] && ! abf_service_exists "$service_name"; then
+        echo "Unknown service: ${service_name}" >&2
+        echo "Available services:" >&2
+        abf_list_services >&2
+        return "$ABF_EXIT_SERVICE_NOT_FOUND"
+    fi
+
+    abf_list_snapshots "$service_name"
+}
+
+# ------------------------------------------------------------------
+# Command: config
+# ------------------------------------------------------------------
+
+_abf_cmd_config_check() {
+    echo "Validating configuration..."
+    if abf_validate_config; then
+        echo "Configuration is valid."
+        return "$ABF_EXIT_OK"
+    else
+        return "$ABF_EXIT_CONFIG_ERROR"
+    fi
+}
+
+# ------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------
+
+_abf_main() {
+    local config_dir=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --config)   config_dir="$2"; shift 2 ;;
+            --verbose|-v) ABF_VERBOSE="true"; export ABF_VERBOSE; shift ;;
+            --version)  echo "abf ${ABF_VERSION}"; exit 0 ;;
+            --help|-h)  _abf_show_help; exit 0 ;;
+            *)          break ;;
+        esac
+    done
+
+    if [[ $# -eq 0 ]]; then
+        _abf_show_help
+        exit 1
+    fi
+
+    abf_load_config "$config_dir" || exit "$ABF_EXIT_CONFIG_ERROR"
+
+    local command="$1"
+    shift
+
+    case "$command" in
+        backup)
+            if [[ $# -lt 1 ]]; then
+                echo "Usage: abf backup <service>" >&2
+                exit 1
+            fi
+            _abf_cmd_backup "$1"
+            ;;
+        restore)
+            local snapshot=""
+            local dry_run="false"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --snapshot) snapshot="$2"; shift 2 ;;
+            --dry-run)  dry_run="true"; shift ;;
+            *)          break ;;
+        esac
+    done
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: abf restore <service> [--snapshot ID] [--dry-run]" >&2
+        echo "  --snapshot ID   Restic snapshot ID (default: latest)" >&2
+        echo "  --dry-run       Simulate restore without modifying files" >&2
+        exit 1
+    fi
+            _abf_cmd_restore "$1" "$snapshot" "$dry_run"
+            ;;
+        list)
+            _abf_cmd_list "${1:-}"
+            ;;
+        config)
+            if [[ "${1:-}" != "check" ]]; then
+                echo "Usage: abf config check" >&2
+                exit 1
+            fi
+            _abf_cmd_config_check
+            ;;
+        *)
+            echo "Unknown command: ${command}" >&2
+            _abf_show_help
+            exit 1
+            ;;
+    esac
+}
+
+_abf_main "$@"

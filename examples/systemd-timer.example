@@ -1,0 +1,32 @@
+# Systemd timer for daily backup at 2 AM
+#
+# Install:
+#   sudo cp abf-backup.service /etc/systemd/system/
+#   sudo cp abf-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now abf-backup.timer
+
+# --- abf-backup.service ---
+[Unit]
+Description=Backup Framework - Vaultwarden backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/abf backup vaultwarden
+User=root
+StandardOutput=journal
+StandardError=journal
+
+# --- abf-backup.timer ---
+[Unit]
+Description=Daily Vaultwarden backup
+Requires=abf-backup.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
