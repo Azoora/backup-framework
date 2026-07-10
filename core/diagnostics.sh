@@ -148,6 +148,30 @@ _abf_diag_check_storage_backend() {
     fi
 }
 
+_abf_diag_check_destinations() {
+    local dests="${BACKUP_DESTINATIONS:-}"
+    if [[ -z "$dests" ]]; then
+        _abf_diag_result "OK" "destinations" "No destinations configured"
+        return 0
+    fi
+
+    if [[ ! -f "${ABF_ROOT}/destinations/manifest.conf" ]]; then
+        _abf_diag_result "ERROR" "destinations" "Destination manifest not found"
+        return 1
+    fi
+
+    IFS=',' read -ra dest_list <<< "$dests"
+    for dest in "${dest_list[@]}"; do
+        dest=$(echo "$dest" | xargs)
+        if abf_load_destination_module "$dest" 2>/dev/null \
+            && abf_load_destination_config "$dest" 2>/dev/null; then
+            _abf_diag_result "OK" "destination_${dest}" "Destination module: ${dest}"
+        else
+            _abf_diag_result "ERROR" "destination_${dest}" "Destination module not found: ${dest}"
+        fi
+    done
+}
+
 _abf_diag_check_smtp() {
     if [[ "${SMTP_ENABLED:-false}" != "true" ]]; then
         _abf_diag_result "OK" "smtp_config" "SMTP notifications disabled"
@@ -387,6 +411,7 @@ abf_doctor_run() {
         _abf_diag_check_rclone_config
         _abf_diag_check_repository
         _abf_diag_check_storage_backend
+        _abf_diag_check_destinations
         _abf_diag_check_smtp
         _abf_diag_check_smtp_connect
         _abf_diag_check_scheduler

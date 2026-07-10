@@ -44,6 +44,16 @@ All tests must pass before any contribution is accepted.
 3. Create `config/storage/<name>.conf` with backend-specific settings.
 4. Run the full test suite.
 
+## How to Add a Destination
+
+1. Add the destination name to `destinations/manifest.conf`.
+2. Create `destinations/<name>/module.sh` defining:
+   - `destination_sync <repo_path>` — syncs the repository to the destination. Return 0 on success, non-zero on failure.
+   - `destination_name` (optional) — returns a human-readable display name for the summary output.
+3. Add configuration defaults to `destinations/<name>/destination.conf`.
+4. Create `tests/test_destination_<name>.sh` with tests for all functions.
+5. Run `bash scripts/test.sh` and verify all tests pass.
+
 ---
 
 ## Testing

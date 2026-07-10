@@ -15,7 +15,7 @@ abf backup vaultwarden    →  staged → restic encrypted → OneDrive
 - **Bash-first** — Zero language runtime dependencies (`set -Eeuo pipefail`)
 - **Encrypted storage** — Restic-backed with AES-256-GCM, configurable password
 - **Off-site support** — OneDrive via rclone restic backend (S3, SFTP, B2 also possible)
-- **Plugin architecture** — Services via `services/<name>/module.sh`, storage via `storage/<name>/module.sh`
+- **Plugin architecture** — Services via `services/<name>/module.sh`, storage via `storage/<name>/module.sh`, destinations via `destinations/<name>/module.sh`
 - **Lifecycle hooks** — `pre_backup`, `backup`, `verify_backup`, `post_backup` (and restore equivalents)
 - **Concurrency safety** — PID-based lock files with stale detection and EXIT trap cleanup
 - **Scheduling** — Auto-detects systemd timers or cron, generates human-readable descriptions
@@ -49,6 +49,10 @@ abf                    CLI entry point
 │   ├── manifest.conf  Explicit storage registry
 │   ├── onedrive/      Rclone-backed OneDrive
 │   └── umbrel/        (future)
+├── destinations/      Destination sync plugins
+│   ├── manifest.conf  Explicit destination registry
+│   ├── local/         Local filesystem (Umbrel)
+│   └── onedrive/      OneDrive via rclone
 ├── config/            Default configuration files
 │   ├── abf.conf       Framework settings
 │   ├── storage.conf   Storage defaults
@@ -77,7 +81,9 @@ abf_restic_backup      →  Encrypt and store snapshot in repository
 service_verify_backup  →  Verify staging dir content
 abf_restic_verify      →  Check repository integrity (5% data subset)
 abf_apply_retention    →  Prune old snapshots per policy
+destination_sync       →  Sync repo to configured destinations (local, onedrive)
 service_post_backup    →  Clean up staging directory
+abf_print_summary      →  Print backup + verify + destination results
 abf_notify_send        →  Send email notification (if configured)
 ```
 
@@ -294,6 +300,17 @@ abf config check
 | OneDrive | Mature | Restic over rclone |
 | Umbrel | Stub | — |
 
+## Supported Destinations
+
+After each backup, the repository can be synced to one or more destinations for redundancy.
+
+| Destination | Status | Mechanism |
+|---|---|---|
+| Local | Mature | rsync to local path (e.g. Umbrel SSD) |
+| OneDrive | Mature | rclone sync to Microsoft OneDrive |
+
+Configure via `BACKUP_DESTINATIONS="local,onedrive"` in `abf.conf`. Each destination is independent — if one fails, the others continue. The backup itself is considered successful as long as the Restic snapshot was created.
+
 ---
 
 ## Scheduling
@@ -329,6 +346,10 @@ services/                  Service plugin modules
   vaultwarden/             Vaultwarden lifecycle hooks
 storage/                   Storage backend plugins
   manifest.conf            Storage registry
+  onedrive/                OneDrive via rclone
+destinations/              Destination sync plugins
+  manifest.conf            Destination registry
+  local/                   Local filesystem (Umbrel)
   onedrive/                OneDrive via rclone
 config/                    Default configuration
   abf.conf                 Framework settings
@@ -374,6 +395,11 @@ ABF_VERBOSE=true bash scripts/test.sh
 
 1. Add backend name to `storage/manifest.conf`
 2. Create `storage/<name>/module.sh` defining `storage_get_repo_url()`
+
+### Adding a Destination
+
+1. Add destination name to `destinations/manifest.conf`
+2. Create `destinations/<name>/module.sh` defining `destination_sync()` and optionally `destination_name()`
 
 ---
 

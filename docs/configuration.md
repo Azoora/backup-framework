@@ -15,6 +15,12 @@ ABF_CACHE_DIR="/tmp/abf/cache"
 
 # Directory for temporary files
 ABF_TEMP_DIR="/tmp/abf"
+
+# Comma-separated list of destinations to sync after each backup
+# Supported values: local, onedrive
+# Local syncs to DESTINATION_LOCAL_PATH (default: /mnt/umbrel/backups/restic)
+# OneDrive syncs to DESTINATION_ONEDRIVE_REMOTE:DESTINATION_ONEDRIVE_PATH
+BACKUP_DESTINATIONS=""
 ```
 
 > **Note:** If upgrading from a previous version, your config may still contain

@@ -71,6 +71,12 @@ abf_load_storage_config() {
     _abf_source_if_exists "${ABF_CONFIG_DIR}/storage/${storage_name}.conf"
 }
 
+abf_load_destination_config() {
+    local destination_name="$1"
+    _abf_source_if_exists "${ABF_ROOT}/destinations/${destination_name}/destination.conf"
+    _abf_source_if_exists "${ABF_CONFIG_DIR}/destinations/${destination_name}.conf"
+}
+
 # ------------------------------------------------------------------
 # Utility
 # ------------------------------------------------------------------

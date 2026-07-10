@@ -149,6 +149,7 @@ rm -rf "${ABF_DST}/abf" \
        "${ABF_DST}/core" \
        "${ABF_DST}/services" \
        "${ABF_DST}/storage" \
+       "${ABF_DST}/destinations" \
        "${ABF_DST}/scripts" \
        "${ABF_DST}/docs" \
        "${ABF_DST}/examples" \
@@ -166,6 +167,7 @@ cp -r "${ABF_SRC}/VERSION"       "${ABF_DST}/VERSION"
 cp -r "${ABF_SRC}/core"          "${ABF_DST}/core"
 cp -r "${ABF_SRC}/services"      "${ABF_DST}/services"
 cp -r "${ABF_SRC}/storage"       "${ABF_DST}/storage"
+cp -r "${ABF_SRC}/destinations"  "${ABF_DST}/destinations"
 cp -r "${ABF_SRC}/scripts"       "${ABF_DST}/scripts"
 cp -r "${ABF_SRC}/docs"          "${ABF_DST}/docs"
 cp -r "${ABF_SRC}/examples"      "${ABF_DST}/examples"

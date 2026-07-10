@@ -60,6 +60,20 @@ _abf_storage_manifest_lines() {
 }
 
 # ------------------------------------------------------------------
+# Destination manifest
+# ------------------------------------------------------------------
+
+abf_destination_exists() {
+    local name="$1"
+    _abf_destination_manifest_lines | grep -qFx "$name" 2>/dev/null
+}
+
+_abf_destination_manifest_lines() {
+    grep -v '^#' "${ABF_ROOT}/destinations/manifest.conf" 2>/dev/null \
+        | grep -v '^[[:space:]]*$' || true
+}
+
+# ------------------------------------------------------------------
 # Service module loader
 # ------------------------------------------------------------------
 
@@ -112,6 +126,29 @@ abf_load_storage_module() {
 }
 
 # ------------------------------------------------------------------
+# Destination module loader
+# ------------------------------------------------------------------
+
+abf_load_destination_module() {
+    local name="$1"
+    local module="${ABF_ROOT}/destinations/${name}/module.sh"
+
+    if [[ ! -f "$module" ]]; then
+        abf_log_error "Destination module not found: ${module}"
+        return 1
+    fi
+
+    source "$module"
+
+    if ! declare -F "destination_sync" &>/dev/null; then
+        abf_log_error "Destination module missing required function: destination_sync"
+        return 1
+    fi
+
+    return 0
+}
+
+# ------------------------------------------------------------------
 # Lifecycle helper: call optional hook if it exists
 # ------------------------------------------------------------------
 
@@ -132,13 +169,16 @@ _abf_call_optional() {
 # 4. service_verify_backup    -- verify backup
 # 5. restic verify            -- verify repository integrity
 # 6. retention                -- forget old snapshots
-# 7. notification             -- send email
+# 7. destination sync         -- sync repo to configured destinations
 # 8. service_post_backup      -- cleanup
+# 9. notification             -- send email
 # ------------------------------------------------------------------
 
 abf_run_backup() {
     local service_name="$1"
     local rc="$ABF_EXIT_OK"
+    local repo_verify_rc="$ABF_EXIT_OK"
+    local dest_results=()
 
     abf_log_info "Starting backup for service: ${service_name}"
 
@@ -204,16 +244,44 @@ abf_run_backup() {
         abf_log_warning "Backup verification reported issues for ${service_name}"
     }
 
-    abf_restic_verify || {
+    if abf_restic_verify; then
+        repo_verify_rc="$ABF_EXIT_OK"
+    else
+        repo_verify_rc="$ABF_EXIT_VERIFICATION_FAILED"
         abf_log_warning "Restic verification reported issues for ${service_name}"
-    }
+    fi
 
     # ----- retention -----
     _abf_retention_apply "$service_name"
 
+    # ----- destination sync -----
+    if [[ -n "${BACKUP_DESTINATIONS:-}" ]]; then
+        dest_results=()
+        IFS=',' read -ra dest_list <<< "$BACKUP_DESTINATIONS"
+        for dest in "${dest_list[@]}"; do
+            dest=$(echo "$dest" | xargs)
+            local label="$dest"
+            if abf_load_destination_module "$dest" 2>/dev/null; then
+                abf_load_destination_config "$dest" 2>/dev/null
+                if declare -F "destination_name" &>/dev/null; then
+                    local dn
+                    dn=$(destination_name 2>/dev/null) && [[ -n "$dn" ]] && label="$dn"
+                fi
+            fi
+            if _abf_sync_destination "$dest" "$service_name"; then
+                dest_results+=("${label}:SUCCESS")
+            else
+                dest_results+=("${label}:FAILED")
+            fi
+        done
+    fi
+
     # ----- cleanup -----
     service_post_backup
     _abf_call_optional service_cleanup "backup"
+
+    # ----- summary -----
+    _abf_print_summary "$service_name" "$rc" "$repo_verify_rc" "${dest_results[@]}"
 
     # ----- notification -----
     _abf_notify_result "$rc" "$service_name"
@@ -439,6 +507,76 @@ _abf_notify_result() {
 }
 
 # ------------------------------------------------------------------
+# Destination sync
+# ------------------------------------------------------------------
+
+_abf_sync_destination() {
+    local dest="$1"
+    local service_name="$2"
+
+    if ! abf_destination_exists "$dest"; then
+        abf_log_warning "Destination '${dest}' is not registered in destinations/manifest.conf"
+        return 1
+    fi
+
+    abf_load_destination_module "$dest" 2>/dev/null || return 1
+    abf_load_destination_config "$dest" 2>/dev/null
+
+    local repo_url
+    repo_url=$(_abf_get_storage_repo 2>/dev/null) || {
+        abf_log_warning "Destination '${dest}': no storage repo available — skipping"
+        return 1
+    }
+
+    abf_log_info "Destination '${dest}': syncing repository"
+    if destination_sync "$repo_url"; then
+        abf_log_success "Destination '${dest}': sync succeeded"
+        return 0
+    else
+        abf_log_error "Destination '${dest}': sync failed"
+        return 1
+    fi
+}
+
+_abf_print_summary() {
+    local service_name="$1"
+    local backup_rc="$2"
+    local verify_rc="$3"
+    shift 3
+    local -a dest_results=("$@")
+
+    local backup_status repo_verify_status entry name status
+
+    if [[ "$backup_rc" -eq "$ABF_EXIT_OK" ]]; then
+        backup_status="SUCCESS"
+    else
+        backup_status="FAILED"
+    fi
+
+    if [[ "$verify_rc" -eq "$ABF_EXIT_OK" ]]; then
+        repo_verify_status="SUCCESS"
+    else
+        repo_verify_status="FAILED"
+    fi
+
+    echo ""
+    echo "========================================"
+    echo "  Backup Summary — ${service_name}"
+    echo "========================================"
+    printf "  %-22s %s\n" "Backup:" "${backup_status}"
+    printf "  %-22s %s\n" "Repository Verify:" "${repo_verify_status}"
+
+    for entry in "${dest_results[@]}"; do
+        name="${entry%%:*}"
+        status="${entry#*:}"
+        printf "  %-22s %s\n" "${name}:" "${status}"
+    done
+
+    echo "========================================"
+    echo ""
+}
+
+# ------------------------------------------------------------------
 # Privilege detection
 # ------------------------------------------------------------------
 
@@ -513,6 +651,24 @@ abf_validate_config() {
         exit_code="$ABF_EXIT_CONFIG_ERROR"
     fi
 
+    # --- Destination module checks ---
+    if [[ -n "${BACKUP_DESTINATIONS:-}" ]]; then
+        if [[ ! -f "${ABF_ROOT}/destinations/manifest.conf" ]]; then
+            echo "  [ERROR] Destination manifest not found at destinations/manifest.conf"
+            errors=$((errors + 1))
+            exit_code="$ABF_EXIT_CONFIG_ERROR"
+        fi
+        IFS=',' read -ra dest_list <<< "$BACKUP_DESTINATIONS"
+        for dest in "${dest_list[@]}"; do
+            dest=$(echo "$dest" | xargs)
+            if [[ ! -f "${ABF_ROOT}/destinations/${dest}/module.sh" ]]; then
+                echo "  [ERROR] Destination module not found: destinations/${dest}/module.sh"
+                errors=$((errors + 1))
+                exit_code="$ABF_EXIT_CONFIG_ERROR"
+            fi
+        done
+    fi
+
     # --- Password file check ---
     if [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}" ]]; then
         echo "  [ERROR] Restic password file not found: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
@@ -543,6 +699,24 @@ abf_validate_config() {
     if ! command -v sqlite3 &>/dev/null; then
         echo "  [WARN]  sqlite3 not installed (recommended for consistent SQLite backups)"
         warnings=$((warnings + 1))
+    fi
+
+    # --- Destination dependency checks ---
+    if [[ -n "${BACKUP_DESTINATIONS:-}" ]]; then
+        IFS=',' read -ra dest_list <<< "$BACKUP_DESTINATIONS"
+        for dest in "${dest_list[@]}"; do
+            dest=$(echo "$dest" | xargs)
+            if [[ "$dest" == "onedrive" ]] && ! command -v rclone &>/dev/null; then
+                echo "  [ERROR] Rclone not installed (required for OneDrive destination)"
+                errors=$((errors + 1))
+                exit_code="$ABF_EXIT_CONFIG_ERROR"
+            fi
+            if [[ "$dest" == "local" ]] && ! command -v rsync &>/dev/null; then
+                echo "  [ERROR] rsync not installed (required for local destination)"
+                errors=$((errors + 1))
+                exit_code="$ABF_EXIT_CONFIG_ERROR"
+            fi
+        done
     fi
 
     # --- Summary ---
