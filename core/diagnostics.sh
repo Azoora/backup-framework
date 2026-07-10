@@ -114,8 +114,16 @@ _abf_diag_check_repository() {
     }
 
     if [[ -z "${ABF_RESTIC_PASSWORD_FILE:-}" ]] \
-        || [[ ! -r "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
-        _abf_diag_result "ERROR" "repository" "Repository password file missing or not readable: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+        || [[ ! -f "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
+        _abf_diag_result "ERROR" "repository" "Repository password file not found: ${ABF_RESTIC_PASSWORD_FILE:-/etc/abf/restic-password}"
+        return 1
+    fi
+
+    if [[ ! -r "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
+        _abf_diag_result "ERROR" "repository" "Repository password file is not readable by the current user.
+
+Run:
+    sudo abf doctor"
         return 1
     fi
 

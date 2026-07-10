@@ -257,7 +257,8 @@ test_diag_repository_unreadable_password_file() {
     for entry in "${ABF_DIAG_RESULTS[@]}"; do
         if echo "$entry" | grep -q "repository"; then
             assert_contains "$entry" "ERROR" "Repository check ERROR for unreadable password"
-            assert_contains "$entry" "not readable" "Message mentions 'not readable' not 'unreachable'"
+            assert_contains "$entry" "is not readable" "Message says 'not readable' not 'unreachable'"
+            assert_contains "$entry" "sudo abf doctor" "Message suggests 'sudo abf doctor'"
             repo_err=true
         fi
     done
@@ -300,6 +301,7 @@ test_diag_repository_missing_password_file() {
     for entry in "${ABF_DIAG_RESULTS[@]}"; do
         if echo "$entry" | grep -q "repository"; then
             assert_contains "$entry" "ERROR" "Repository check ERROR for missing password file"
+            assert_contains "$entry" "not found" "Message says 'not found' not 'not readable'"
             found_err=true
         fi
     done
