@@ -175,6 +175,85 @@ test_install_dep_check_restic_required() {
     return 0
 }
 
+test_install_no_nested_duplicate_directories() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+
+    # Simulate first installation
+    local dst="${tmpdir}/opt/abf"
+    mkdir -p "${dst}"
+    cp -r "${ABF_ROOT}/core"  "${dst}/core"
+    cp -r "${ABF_ROOT}/services" "${dst}/services"
+    cp -r "${ABF_ROOT}/storage"  "${dst}/storage"
+    cp -r "${ABF_ROOT}/scripts"  "${dst}/scripts"
+
+    # Now simulate re-install (the exact pattern install.sh uses after cleanup)
+    rm -rf "${dst}/core" "${dst}/services" "${dst}/storage" "${dst}/scripts"
+    cp -r "${ABF_ROOT}/core"     "${dst}/core"
+    cp -r "${ABF_ROOT}/services" "${dst}/services"
+    cp -r "${ABF_ROOT}/storage"  "${dst}/storage"
+    cp -r "${ABF_ROOT}/scripts"  "${dst}/scripts"
+
+    # Check for nested duplicate directories
+    if [[ -d "${dst}/core/core" ]]; then
+        echo "  FAIL: Nested duplicate 'core/core/' exists after re-install"
+        return 1
+    fi
+    if [[ -d "${dst}/services/services" ]]; then
+        echo "  FAIL: Nested duplicate 'services/services/' exists after re-install"
+        return 1
+    fi
+    if [[ -d "${dst}/storage/storage" ]]; then
+        echo "  FAIL: Nested duplicate 'storage/storage/' exists after re-install"
+        return 1
+    fi
+    if [[ -d "${dst}/scripts/scripts" ]]; then
+        echo "  FAIL: Nested duplicate 'scripts/scripts/' exists after re-install"
+        return 1
+    fi
+
+    # Verify the installed files are the real ones, not stale nested copies
+    if [[ -f "${dst}/core/core/main.sh" ]]; then
+        echo "  FAIL: Stale nested file 'core/core/main.sh' exists after re-install"
+        return 1
+    fi
+
+    return 0
+}
+
+test_install_files_contain_latest_code() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-inst-XXXXXX")
+    local dst="${tmpdir}/opt/abf"
+
+    mkdir -p "${dst}"
+
+    # Simulate a clean installation
+    rm -rf "${dst}/core" "${dst}/services"
+    cp -r "${ABF_ROOT}/core"     "${dst}/core"
+    cp -r "${ABF_ROOT}/services" "${dst}/services"
+
+    # Verify installed files match source files (same content, not outdated)
+    local src_core_files dst_core_files
+    src_core_files=$(find "${ABF_ROOT}/core" -type f | sort)
+    dst_core_files=$(find "${dst}/core" -type f | sort)
+
+    local src_file dst_file
+    while IFS= read -r src_file; do
+        dst_file="${dst}/core/${src_file#${ABF_ROOT}/core/}"
+        if [[ ! -f "$dst_file" ]]; then
+            echo "  FAIL: Installed file missing: ${dst_file}"
+            return 1
+        fi
+        if ! diff -q "$src_file" "$dst_file" >/dev/null 2>&1; then
+            echo "  FAIL: Content mismatch: ${dst_file} does not match source"
+            return 1
+        fi
+    done <<< "$src_core_files"
+
+    return 0
+}
+
 test_install_sources_version_file() {
     # Verify install.sh references VERSION (the framework version, not install.sh version)
     local install="${ABF_ROOT}/scripts/install.sh"

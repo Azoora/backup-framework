@@ -140,6 +140,25 @@ install -d -m 0755 /var/cache/abf
 # 2. Copy framework (preserve relative paths)
 # ------------------------------------------------------------------
 echo "==> Installing framework to ${ABF_DST}..."
+
+# Remove stale framework files before copy to prevent nested directory
+# duplication (cp -r src/ dst/ creates dst/src/ when dst/ already exists)
+rm -rf "${ABF_DST}/abf" \
+       "${ABF_DST}/core" \
+       "${ABF_DST}/services" \
+       "${ABF_DST}/storage" \
+       "${ABF_DST}/scripts" \
+       "${ABF_DST}/docs" \
+       "${ABF_DST}/examples" \
+       "${ABF_DST}/tests" \
+       "${ABF_DST}/VERSION" \
+       "${ABF_DST}/CHANGELOG.md" \
+       "${ABF_DST}/CONTRIBUTING.md" \
+       "${ABF_DST}/LICENSE" \
+       "${ABF_DST}/README.md" \
+       "${ABF_DST}/RELEASE_NOTES.md" \
+       "${ABF_DST}/SECURITY.md"
+
 cp -r "${ABF_SRC}/abf"           "${ABF_DST}/abf"
 cp -r "${ABF_SRC}/VERSION"       "${ABF_DST}/VERSION"
 cp -r "${ABF_SRC}/core"          "${ABF_DST}/core"
