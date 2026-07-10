@@ -71,10 +71,25 @@ service_post_backup() {
 
 service_pre_restore() {
     local snapshot="$1"
+    local target="${ABF_RESTORE_TARGET:-}"
 
-    if [[ ! -d "${SERVICE_VAULTWARDEN_DATA_DIR}" ]]; then
-        abf_log_error "Vaultwarden data directory does not exist: ${SERVICE_VAULTWARDEN_DATA_DIR}"
+    local data_dir="${target:-${SERVICE_VAULTWARDEN_DATA_DIR}}"
+
+    if [[ ! -d "$data_dir" ]]; then
+        abf_log_info "Creating target directory: ${data_dir}"
+        mkdir -p "$data_dir" || {
+            abf_log_error "Cannot create target directory: ${data_dir}"
+            return 1
+        }
+    fi
+
+    if [[ ! -w "$data_dir" ]]; then
+        abf_log_error "Target directory not writable: ${data_dir}"
         return 1
+    fi
+
+    if [[ -n "$target" ]]; then
+        abf_log_info "Restore target: ${target}"
     fi
 
     local staging="${ABF_RESTORE_STAGING:-}"
@@ -97,7 +112,7 @@ service_restore() {
     local snapshot="$1"
     local dry_run="$2"
     local staging="${ABF_RESTORE_STAGING:-}"
-    local data_dir="${SERVICE_VAULTWARDEN_DATA_DIR}"
+    local data_dir="${ABF_RESTORE_TARGET:-${SERVICE_VAULTWARDEN_DATA_DIR}}"
 
     if [[ -z "$staging" ]] || [[ ! -d "$staging" ]]; then
         abf_log_error "Restore staging directory not available"
@@ -119,14 +134,38 @@ service_restore() {
     return 0
 }
 
+service_resolve_components() {
+    local raw="$1"
+    if [[ -z "$raw" ]]; then
+        echo "db.sqlite3,config.json,attachments,icon_cache,rsa_keys"
+        return
+    fi
+    local result=()
+    IFS=',' read -ra parts <<< "$raw"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            db)          result+=("db.sqlite3") ;;
+            config)      result+=("config.json") ;;
+            attachments) result+=("attachments") ;;
+            icon_cache)  result+=("icon_cache") ;;
+            rsa_keys)    result+=("rsa_keys") ;;
+            *)           result+=("$part") ;;
+        esac
+    done
+    local IFS=','
+    echo "${result[*]}"
+}
+
 service_verify_restore() {
-    if [[ ! -d "${SERVICE_VAULTWARDEN_DATA_DIR}" ]]; then
+    local data_dir="${ABF_RESTORE_TARGET:-${SERVICE_VAULTWARDEN_DATA_DIR}}"
+
+    if [[ ! -d "$data_dir" ]]; then
         abf_log_error "Verification failed: data directory missing after restore"
         return 1
     fi
 
     local file_count
-    file_count=$(find "${SERVICE_VAULTWARDEN_DATA_DIR}" -type f 2>/dev/null | wc -l)
+    file_count=$(find "$data_dir" -type f 2>/dev/null | wc -l)
     abf_log_success "Verification passed: ${file_count} file(s) in data directory"
     return 0
 }
@@ -145,15 +184,18 @@ service_post_restore() {
 
 service_healthcheck() {
     local context="${1:-}"
+    local data_dir="${ABF_RESTORE_TARGET:-${SERVICE_VAULTWARDEN_DATA_DIR:-}}"
 
-    if [[ ! -d "${SERVICE_VAULTWARDEN_DATA_DIR:-}" ]]; then
+    if [[ ! -d "$data_dir" ]]; then
         abf_log_warning "Healthcheck: data directory not found (context: ${context})"
         return 1
     fi
 
-    if [[ ! -f "${SERVICE_VAULTWARDEN_DATA_DIR}/db.sqlite3" ]]; then
-        abf_log_warning "Healthcheck: database file not found (context: ${context})"
-        return 1
+    if [[ -z "${ABF_RESTORE_TARGET:-}" ]]; then
+        if [[ ! -f "${data_dir}/db.sqlite3" ]]; then
+            abf_log_warning "Healthcheck: database file not found (context: ${context})"
+            return 1
+        fi
     fi
 
     abf_log_info "Healthcheck passed (context: ${context})"
@@ -267,25 +309,34 @@ _vw_backup_config() {
     abf_log_success "Config backup completed"
 }
 
+_vw_component_enabled() {
+    local name="$1"
+    local components="${ABF_RESTORE_COMPONENTS:-}"
+    [[ -z "$components" ]] && return 0
+    [[ ",${components}," == *",${name},"* ]] && return 0
+    return 1
+}
+
 _vw_restore_all() {
     local staging="$1"
     local data_dir="$2"
 
-    _vw_restore_item "$staging" "db.sqlite3"  "$data_dir" "database"
-    _vw_restore_item "$staging" "config.json" "$data_dir" "config"
-    _vw_restore_dir  "$staging" "attachments" "$data_dir"
-    _vw_restore_dir  "$staging" "icon_cache"  "$data_dir"
-
-    local rsa_src="${staging}/rsa_keys"
-    if [[ -d "$rsa_src" ]]; then
-        abf_log_info "  Restoring RSA keys..."
-        for key_file in "$rsa_src"/*; do
-            if [[ -f "$key_file" ]]; then
-                cp "$key_file" "$data_dir/"
-            fi
-        done
-        abf_log_success "  Restored: RSA keys"
+    if _vw_component_enabled "db.sqlite3"; then
+        _vw_restore_item "$staging" "db.sqlite3" "$data_dir" "database" || true
     fi
+    if _vw_component_enabled "config.json"; then
+        _vw_restore_item "$staging" "config.json" "$data_dir" "config" || true
+    fi
+    if _vw_component_enabled "attachments"; then
+        _vw_restore_dir "$staging" "attachments" "$data_dir" || true
+    fi
+    if _vw_component_enabled "icon_cache"; then
+        _vw_restore_dir "$staging" "icon_cache" "$data_dir" || true
+    fi
+    if _vw_component_enabled "rsa_keys"; then
+        _vw_restore_rsa_keys "$staging" "$data_dir" || true
+    fi
+    return 0
 }
 
 _vw_restore_item() {
@@ -294,14 +345,21 @@ _vw_restore_item() {
     local data_dir="$3"
     local label="$4"
     local src="${staging}/${name}"
+    local dst="${data_dir}/${name}"
 
     if [[ ! -f "$src" ]]; then
         abf_log_info "  ${label} not in archive -- skipping"
         return
     fi
 
+    if ! command -v rsync &>/dev/null; then
+        abf_log_error "rsync is required for restore operations. Install rsync and try again."
+        return 1
+    fi
+
     abf_log_info "  Restoring ${label}..."
-    cp "$src" "${data_dir}/${name}"
+    mkdir -p "$(dirname "$dst")"
+    rsync -a "$src" "$dst"
     abf_log_success "  Restored: ${name}"
 }
 
@@ -317,12 +375,43 @@ _vw_restore_dir() {
         return
     fi
 
-    if [[ -d "$dst" ]]; then
-        abf_log_info "  Merging ${name}..."
-        rm -rf "$dst"
-    else
-        abf_log_info "  Restoring ${name}..."
+    if ! command -v rsync &>/dev/null; then
+        abf_log_error "rsync is required for restore operations. Install rsync and try again."
+        return 1
     fi
-    cp -r "$src" "$dst"
+
+    mkdir -p "$(dirname "$dst")"
+
+    if [[ "${ABF_RESTORE_REPLACE_ALL:-false}" == "true" ]]; then
+        abf_log_info "  Restoring ${name} (replace-all)..."
+        rsync -a --delete "$src/" "$dst/"
+    else
+        if [[ -d "$dst" ]]; then
+            abf_log_info "  Merging ${name}..."
+        else
+            abf_log_info "  Restoring ${name}..."
+        fi
+        rsync -a "$src/" "$dst/"
+    fi
     abf_log_success "  Restored: ${name}/"
+}
+
+_vw_restore_rsa_keys() {
+    local staging="$1"
+    local data_dir="$2"
+    local rsa_src="${staging}/rsa_keys"
+
+    if [[ ! -d "$rsa_src" ]]; then
+        abf_log_info "  RSA keys not in archive -- skipping"
+        return
+    fi
+
+    if ! command -v rsync &>/dev/null; then
+        abf_log_error "rsync is required for restore operations. Install rsync and try again."
+        return 1
+    fi
+
+    abf_log_info "  Restoring RSA keys..."
+    rsync -a "$rsa_src/" "$data_dir/"
+    abf_log_success "  Restored: RSA keys"
 }

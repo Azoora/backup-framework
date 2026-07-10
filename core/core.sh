@@ -243,7 +243,22 @@ abf_run_restore() {
     local snapshot="${2:-}"
     local dry_run="${3:-false}"
     local yes="${4:-false}"
+    local target_dir="${5:-}"
+    local components="${6:-}"
+    local replace_all="${7:-false}"
     local rc="$ABF_EXIT_OK"
+
+    export ABF_RESTORE_TARGET="$target_dir"
+    export ABF_RESTORE_REPLACE_ALL="$replace_all"
+
+    if [[ -n "$components" ]]; then
+        abf_load_service_module "$service_name" || return "$ABF_EXIT_SERVICE_NOT_FOUND"
+        local resolved
+        resolved=$(_abf_resolve_components "$components")
+        export ABF_RESTORE_COMPONENTS="$resolved"
+    else
+        export ABF_RESTORE_COMPONENTS=""
+    fi
 
     abf_log_info "Starting restore for service: ${service_name}"
 
@@ -257,15 +272,17 @@ abf_run_restore() {
     ABF_LOCK_SERVICE="$service_name"
     trap 'abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""; trap - EXIT' EXIT
 
-    # ----- privilege check -----
-    _abf_check_restore_privileges "$service_name" || {
-        rc="$ABF_EXIT_RESTORE_FAILED"
-        trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
-        return "$rc"
-    }
+    # ----- privilege check (skip data dir check for --target) -----
+    if [[ -z "$target_dir" ]]; then
+        _abf_check_restore_privileges "$service_name" || {
+            rc="$ABF_EXIT_RESTORE_FAILED"
+            trap - EXIT; abf_lock_release "$ABF_LOCK_SERVICE"; ABF_LOCK_SERVICE=""
+            return "$rc"
+        }
+    fi
 
     # ----- confirmation -----
-    _abf_require_confirmation "$dry_run" "$yes"
+    _abf_require_confirmation "$dry_run" "$yes" "$replace_all"
     local confirm_rc=$?
     if [[ $confirm_rc -eq 1 ]]; then
         # User cancelled — clean exit, not an error
@@ -300,6 +317,17 @@ abf_run_restore() {
             abf_restic_restore "$snapshot" "$staging" "$service_name" || {
                 rc="$ABF_EXIT_RESTORE_FAILED"
             }
+        fi
+
+        # ----- pre-restore backup (safety net, skipped for --target) -----
+        if [[ -z "$target_dir" ]]; then
+            local prefix
+            prefix=$(_abf_svc_var_prefix "$service_name")
+            local data_dir_var="${prefix}_DATA_DIR"
+            local data_dir="${!data_dir_var:-}"
+            if [[ -n "$data_dir" ]] && [[ -d "$data_dir" ]]; then
+                _abf_create_pre_restore_backup "$service_name" "$data_dir"
+            fi
         fi
 
         ABF_RESTORE_STAGING="$staging"
@@ -506,6 +534,11 @@ abf_validate_config() {
             echo "  [WARN]  Rclone not installed (recommended for remote storage)"
             warnings=$((warnings + 1))
         fi
+    fi
+    if ! command -v rsync &>/dev/null; then
+        echo "  [ERROR] rsync not installed (required for restore operations)"
+        errors=$((errors + 1))
+        exit_code="$ABF_EXIT_CONFIG_ERROR"
     fi
     if ! command -v sqlite3 &>/dev/null; then
         echo "  [WARN]  sqlite3 not installed (recommended for consistent SQLite backups)"

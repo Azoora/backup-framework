@@ -43,6 +43,14 @@ _abf_diag_check_sqlite3() {
     fi
 }
 
+_abf_diag_check_rsync() {
+    if command -v rsync &>/dev/null; then
+        _abf_diag_result "OK" "rsync_installed" "rsync is installed"
+    else
+        _abf_diag_result "ERROR" "rsync_installed" "rsync not installed (required for restore operations)"
+    fi
+}
+
 _abf_diag_check_rclone_config() {
     if ! command -v rclone &>/dev/null; then
         local backend="${ABF_STORAGE_BACKEND:-local}"
@@ -366,6 +374,7 @@ abf_doctor_run() {
         _abf_diag_check_config
         _abf_diag_check_restic
         _abf_diag_check_rclone
+        _abf_diag_check_rsync
         _abf_diag_check_sqlite3
         _abf_diag_check_rclone_config
         _abf_diag_check_repository

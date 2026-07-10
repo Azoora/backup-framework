@@ -18,6 +18,7 @@ CONFIG_DST="/etc/abf"
 ABF_DEPS=(
     "restic:restic:Restic (encrypted backups):required"
     "rclone:rclone:Rclone (remote storage backends):recommended"
+    "rsync:rsync:rsync (file transfer for restore operations):required"
     "sqlite3:sqlite3:sqlite3 (consistent SQLite database snapshots):recommended"
 )
 
@@ -88,6 +89,7 @@ _abf_install_deps_debian() {
         case "$pkg" in
             restic) apt_packages="$apt_packages restic" ;;
             rclone) apt_packages="$apt_packages rclone" ;;
+            rsync)  apt_packages="$apt_packages rsync" ;;
             sqlite3) apt_packages="$apt_packages sqlite3" ;;
         esac
     done

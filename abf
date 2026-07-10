@@ -55,14 +55,16 @@ Usage: abf [options] <command> [args]
 
 Commands:
   backup <service>         Create a backup of the specified service
-  restore <service>        Restore the specified service [--dry-run] [--snapshot ID] [--yes]
+  restore <service>        Restore the specified service [--snapshot ID]
+                            [--dry-run] [--yes] [--target DIR]
+                            [--components LIST] [--replace-all]
   list [service]           List available restic snapshots
    config check             Validate configuration
    config migrate           Migrate configuration (upgrade defaults)
   doctor [--json]          Run comprehensive health diagnostics
   schedule install <svc>   Schedule recurring backups
-                           [--frequency daily|weekly|monthly|<cron>]
-                           [--at HH:MM] [--on-day DAY] [--force]
+                            [--frequency daily|weekly|monthly|<cron>]
+                            [--at HH:MM] [--on-day DAY] [--force]
   schedule remove <svc>    Remove a scheduled backup
   schedule status <svc>    Show schedule status for a service
   schedule list            List all scheduled backups
@@ -77,6 +79,9 @@ Examples:
   abf backup vaultwarden
   abf restore vaultwarden --dry-run
   abf restore vaultwarden --yes
+  abf restore vaultwarden --target /tmp/restore-test
+  abf restore vaultwarden --components db,config
+  abf restore vaultwarden --replace-all
   abf schedule install vaultwarden --frequency daily --at 02:00
   abf schedule remove vaultwarden
   abf schedule list
@@ -113,6 +118,9 @@ _abf_cmd_restore() {
     local snapshot="${2:-}"
     local dry_run="${3:-false}"
     local yes="${4:-false}"
+    local target="${5:-}"
+    local components="${6:-}"
+    local replace_all="${7:-false}"
     local log_dir="${ABF_LOG_DIR:-}"
 
     abf_init_logging "$service_name" "restore" "$log_dir"
@@ -143,7 +151,17 @@ _abf_cmd_restore() {
         abf_log_info "Auto-selected latest snapshot: ${snapshot}"
     fi
 
-    abf_run_restore "$service_name" "$snapshot" "$dry_run" "$yes"
+    if [[ -n "$target" ]]; then
+        abf_log_info "Restore target: ${target}"
+    fi
+    if [[ -n "$components" ]]; then
+        abf_log_info "Components: ${components}"
+    fi
+    if [[ "$replace_all" == "true" ]]; then
+        abf_log_info "Replace-all mode enabled"
+    fi
+
+    abf_run_restore "$service_name" "$snapshot" "$dry_run" "$yes" "$target" "$components" "$replace_all"
 }
 
 # ------------------------------------------------------------------
@@ -218,12 +236,18 @@ _abf_main() {
             local snapshot=""
             local dry_run="false"
             local yes="false"
+            local target=""
+            local components=""
+            local replace_all="false"
             local service_name=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --snapshot) snapshot="$2"; shift 2 ;;
-            --dry-run)  dry_run="true"; shift ;;
-            --yes|-y)   yes="true"; shift ;;
+            --snapshot)         snapshot="$2"; shift 2 ;;
+            --dry-run)          dry_run="true"; shift ;;
+            --yes|-y)           yes="true"; shift ;;
+            --target)           target="$2"; shift 2 ;;
+            --components)       components="$2"; shift 2 ;;
+            --replace-all)      replace_all="true"; shift ;;
             -*)
                 echo "Unknown option: $1" >&2
                 exit 1
@@ -237,13 +261,16 @@ _abf_main() {
         esac
     done
     if [[ -z "$service_name" ]]; then
-        echo "Usage: abf restore <service> [--snapshot ID] [--dry-run] [--yes]" >&2
-        echo "  --snapshot ID   Restic snapshot ID (default: latest)" >&2
-        echo "  --dry-run       Simulate restore without modifying files" >&2
-        echo "  --yes, -y       Skip interactive confirmation" >&2
+        echo "Usage: abf restore <service> [--snapshot ID] [--dry-run] [--yes] [--target DIR] [--components LIST] [--replace-all]" >&2
+        echo "  --snapshot ID       Restic snapshot ID (default: latest)" >&2
+        echo "  --dry-run           Simulate restore without modifying files" >&2
+        echo "  --yes, -y           Skip interactive confirmation" >&2
+        echo "  --target DIR        Restore to an alternate directory (skips pre-backup)" >&2
+        echo "  --components LIST   Comma-separated component names (db,config,attachments,icon_cache,rsa_keys)" >&2
+        echo "  --replace-all       Delete destination before restoring instead of merging" >&2
         exit 1
     fi
-            _abf_cmd_restore "$service_name" "$snapshot" "$dry_run" "$yes"
+            _abf_cmd_restore "$service_name" "$snapshot" "$dry_run" "$yes" "$target" "$components" "$replace_all"
             ;;
         list)
             _abf_cmd_list "${1:-}"
