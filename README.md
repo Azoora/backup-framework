@@ -19,7 +19,7 @@ abf backup vaultwarden    →  staged → restic encrypted → OneDrive
 - **Lifecycle hooks** — `pre_backup`, `backup`, `verify_backup`, `post_backup` (and restore equivalents)
 - **Concurrency safety** — PID-based lock files with stale detection and EXIT trap cleanup
 - **Scheduling** — Auto-detects systemd timers or cron, generates human-readable descriptions
-- **Notifications** — SMTP email with four delivery fallbacks (mail, sendmail, msmtp, bash TCP)
+- **Notifications** — SMTP email with four delivery fallbacks (mail, sendmail, msmtp, bash TCP). Subject includes status (SUCCESS/WARNING/FAILED), service name, snapshot ID, start/end time, duration, repo verification result, destination results, and attaches the backup log (up to configurable size limit).
 - **Retention** — Policy-driven snapshot pruning via `restic forget` (daily/weekly/monthly)
 - **Diagnostics** — `abf doctor` with 13 health checks, JSON mode for monitoring
 - **Dual-output logging** — Human-readable `.log` + machine-readable `.jsonl`
@@ -56,7 +56,7 @@ abf                    CLI entry point
 ├── config/            Default configuration files
 │   ├── abf.conf       Framework settings
 │   ├── storage.conf   Storage defaults
-│   ├── smtp.conf      SMTP notification settings
+│   ├── smtp.conf      SMTP notification settings (host, port, TLS, auth, from name/email, recipients, log attach)
 │   └── services/      Per-service overrides
 ├── tests/             Automated test suite (54 tests)
 ├── scripts/           install.sh, test.sh
@@ -281,6 +281,22 @@ abf list vaultwarden    # snapshots for a specific service
 ```bash
 abf destination check   # validate all configured destinations
 ```
+
+### SMTP Configuration Wizard
+
+```bash
+sudo abf config smtp
+```
+
+Interactive wizard for configuring SMTP notifications. Prompts for host, port, TLS, credentials, sender info, and recipients. Saves to `/etc/abf/smtp.conf` without overwriting existing values unless confirmed. Optionally sends a test email after configuration.
+
+### Test Notification
+
+```bash
+abf notify test
+```
+
+Sends a test email using the current SMTP configuration. Reports success or failure immediately. Requires `SMTP_ENABLED="true"` in `smtp.conf`.
 
 ### Config Validation
 

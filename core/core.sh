@@ -180,6 +180,12 @@ abf_run_backup() {
     local repo_verify_rc="$ABF_EXIT_OK"
     local dest_results=()
 
+    ABF_BACKUP_START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S%z")
+    ABF_BACKUP_END_TIME=""
+    ABF_BACKUP_DURATION=""
+    ABF_BACKUP_REPO_VERIFY_STATUS=""
+    ABF_BACKUP_DEST_RESULTS=""
+
     abf_log_info "Starting backup for service: ${service_name}"
 
     # Acquire lock -- prevents concurrent backups
@@ -279,6 +285,40 @@ abf_run_backup() {
     # ----- cleanup -----
     service_post_backup
     _abf_call_optional service_cleanup "backup"
+
+    # ----- timing -----
+    ABF_BACKUP_END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S%z")
+    if [[ -n "$ABF_BACKUP_START_TIME" ]]; then
+        local start_s end_s diff_s
+        start_s=$(date -d "$ABF_BACKUP_START_TIME" +%s 2>/dev/null || echo "0")
+        end_s=$(date -d "$ABF_BACKUP_END_TIME" +%s 2>/dev/null || echo "0")
+        diff_s=$(( end_s - start_s ))
+        if [[ $diff_s -ge 0 ]]; then
+            local hours mins secs
+            hours=$(( diff_s / 3600 ))
+            mins=$(( (diff_s % 3600) / 60 ))
+            secs=$(( diff_s % 60 ))
+            ABF_BACKUP_DURATION=$(printf "%02d:%02d:%02d" "$hours" "$mins" "$secs")
+        fi
+    fi
+
+    # ----- repo verify status -----
+    if [[ "$repo_verify_rc" -eq "$ABF_EXIT_OK" ]]; then
+        ABF_BACKUP_REPO_VERIFY_STATUS="SUCCESS"
+    else
+        ABF_BACKUP_REPO_VERIFY_STATUS="FAILED"
+    fi
+
+    # ----- destination results -----
+    if [[ ${#dest_results[@]} -gt 0 ]]; then
+        ABF_BACKUP_DEST_RESULTS=""
+        for entry in "${dest_results[@]}"; do
+            if [[ -n "$ABF_BACKUP_DEST_RESULTS" ]]; then
+                ABF_BACKUP_DEST_RESULTS+=", "
+            fi
+            ABF_BACKUP_DEST_RESULTS+="${entry}"
+        done
+    fi
 
     # ----- summary -----
     _abf_print_summary "$service_name" "$rc" "$repo_verify_rc" "${dest_results[@]}"
@@ -498,9 +538,10 @@ _abf_notify_result() {
         status="FAILED"
     fi
 
-    local details="Snapshot: ${ABF_SNAPSHOT_ID:-none}"
+    local details=""
+    details="${details}Snapshot ID: ${ABF_SNAPSHOT_ID:-none}"
     if [[ -n "${ABF_RESTIC_REPO:-}" ]]; then
-        details="${details}\nRepository: ${ABF_RESTIC_REPO}"
+        details="${details}"$'\n'"Repository: ${ABF_RESTIC_REPO}"
     fi
 
     abf_notify_send "$status" "$service_name" "$details" || true

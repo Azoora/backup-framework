@@ -61,6 +61,8 @@ Commands:
   list [service]           List available restic snapshots
   config check             Validate configuration
   config migrate           Migrate configuration (upgrade defaults)
+  config smtp              Interactive SMTP configuration wizard
+  notify test              Send a test email to verify SMTP settings
   destination check        Validate configured destinations
   doctor [--json]          Run comprehensive health diagnostics
   schedule install <svc>   Schedule recurring backups
@@ -84,6 +86,8 @@ Examples:
   abf restore vaultwarden --components db,config
   abf restore vaultwarden --replace-all
   abf destination check
+  abf config smtp
+  abf notify test
   abf schedule install vaultwarden --frequency daily --at 02:00
   abf schedule remove vaultwarden
   abf schedule list
@@ -286,8 +290,11 @@ _abf_main() {
                     shift
                     abf_config_migrate
                     ;;
+                smtp)
+                    abf_config_wizard_smtp "$ABF_CONFIG_DIR"
+                    ;;
                 *)
-                    echo "Usage: abf config {check|migrate}" >&2
+                    echo "Usage: abf config {check|migrate|smtp}" >&2
                     exit 1
                     ;;
             esac
@@ -310,6 +317,18 @@ _abf_main() {
                 json_mode="true"
             fi
             abf_doctor_run "$json_mode"
+            ;;
+        notify)
+            if [[ "${1:-}" != "test" ]]; then
+                echo "Usage: abf notify test" >&2
+                exit 1
+            fi
+            shift
+            if [[ "${SMTP_ENABLED:-false}" != "true" ]]; then
+                echo "SMTP notifications are disabled. Enable by setting SMTP_ENABLED=\"true\" in smtp.conf"
+                exit 1
+            fi
+            abf_notify_send_test
             ;;
         schedule)
             local subcommand="${1:-}"

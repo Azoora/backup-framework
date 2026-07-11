@@ -80,7 +80,7 @@ Edit the configuration files in `/etc/abf/`:
 
 - `abf.conf` — Framework settings (log directory, storage backend, retention)
 - `storage.conf` — Storage backend defaults
-- `smtp.conf` — SMTP notification settings
+- `smtp.conf` — SMTP notification settings (host, port, TLS, auth, from name/email, recipients, log attach)
 - `services/vaultwarden.conf` — Vaultwarden paths and component selection
 
 See the [Configuration Guide](configuration.md) for details.

@@ -79,6 +79,31 @@ Every backup generates two log files in the configured log directory:
 - `vaultwarden_backup_<timestamp>.log` -- Human-readable
 - `vaultwarden_backup_<timestamp>.jsonl` -- Machine-readable (JSON Lines)
 
+## Notifications
+
+When SMTP is enabled (`SMTP_ENABLED="true"` in `smtp.conf`), an email is sent after every backup with:
+
+- **Subject** indicates overall status: `SUCCESS`, `WARNING` (verification issues), or `FAILED`
+- **Body** includes: service name, hostname, timestamp, snapshot ID, start/end times, duration, repository verification result, and destination sync results
+- **Attachment** of the backup log file (up to `SMTP_LOG_ATTACH_MAX_KB`, default 64 KB)
+- **Multiple recipients** via comma-separated `SMTP_TO`
+
+### Test Notifications
+
+```bash
+abf notify test
+```
+
+Sends a test email to validate SMTP configuration.
+
+### Interactive Configuration
+
+```bash
+sudo abf config smtp
+```
+
+Walk through all SMTP settings interactively. Existing values are preserved unless overwrite is confirmed.
+
 ## Scheduling
 
 The framework does not install cron jobs automatically. Use your system's scheduler:

@@ -136,3 +136,59 @@ ONEDRIVE_REMOTE="OneDrive"
 # Path within the remote where backups will be stored
 ONEDRIVE_PATH="Backups/BackupFramework"
 ```
+
+## SMTP Notification Configuration
+
+### File: `smtp.conf`
+
+```bash
+# Set to "true" to enable email notifications
+SMTP_ENABLED="false"
+
+# SMTP server settings
+SMTP_HOST=""
+SMTP_PORT="587"
+SMTP_TLS="true"
+
+# Authentication (leave blank for open relay)
+SMTP_USER=""
+SMTP_PASS=""
+
+# Sender information
+SMTP_FROM_NAME="Backup Framework"
+SMTP_FROM="backup-framework@example.com"
+
+# Recipient(s) — comma-separated for multiple addresses
+SMTP_TO="admin@example.com"
+
+# Maximum size of log file to attach to notification emails (KB)
+SMTP_LOG_ATTACH_MAX_KB="64"
+```
+
+### Interactive Wizard
+
+```bash
+sudo abf config smtp
+```
+
+Walks through all SMTP settings interactively. Existing values are preserved unless confirmed for overwrite. Prompts for hidden password input and optionally sends a test email on completion.
+
+### Test Command
+
+```bash
+abf notify test
+```
+
+Sends a test email using the current SMTP config and reports success or failure. Requires `SMTP_ENABLED="true"`.
+
+### Notification Enhancements
+
+Backup notification emails include:
+- Subject with status indicator: `SUCCESS`, `WARNING`, or `FAILED`
+- Service name and hostname
+- Snapshot ID
+- Backup start time, end time, and duration
+- Repository verification result
+- Destination sync results (per destination)
+- Backup log file attached (if below `SMTP_LOG_ATTACH_MAX_KB` limit)
+- Multiple recipients supported via comma-separated `SMTP_TO`
