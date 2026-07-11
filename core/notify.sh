@@ -260,7 +260,7 @@ _abf_build_mime_message() {
 }
 
 _abf_mime_append() {
-    msg="${msg}${1}\r\n"
+    msg="${msg}${1}"$'\n'
 }
 
 # ==================================================================
@@ -322,9 +322,6 @@ _abf_sendmail_msmtp() {
         return 1
     fi
 
-    local msg
-    msg=$(_abf_build_mime_message "$subject" "$body" "$service")
-
     local rcpt_args=()
     while IFS= read -r addr; do
         [[ -n "$addr" ]] && rcpt_args+=("$addr")
@@ -374,7 +371,7 @@ _abf_sendmail_msmtp() {
 
     local msmtp_stderr
     msmtp_stderr=$(mktemp -t "abf-msmtp-err-XXXXXX")
-    printf '%s\r\n' "$msg" | msmtp "${msmtp_args[@]}" "${rcpt_args[@]}" 2>"$msmtp_stderr"
+    _abf_build_mime_message "$subject" "$body" "$service" | msmtp "${msmtp_args[@]}" "${rcpt_args[@]}" 2>"$msmtp_stderr"
     local rc=$?
 
     if [[ -n "${pw_file:-}" ]]; then
@@ -426,10 +423,6 @@ _abf_sendmail_openssl() {
     from_header=$(_abf_format_from)
     local recipients
     recipients=$(paste -sd, <(_abf_split_recipients))
-
-    # Build the MIME message for consistent format with other backends
-    local msg
-    msg=$(_abf_build_mime_message "$subject" "$body" "$service")
 
     local rcpt_list=()
     while IFS= read -r addr; do
@@ -613,15 +606,14 @@ _abf_sendmail_openssl() {
         return 1
     }
 
-    # 7. Send the message headers and body (converting literal \r\n to
-    # actual CRLF), then the SMTP DATA terminator "." on its own line.
-    printf '%s\r\n' "$msg" >&$ssl_in || {
-        _openssl_v_echo "failed to write message body"
-        _abf_openssl_close
-        return 1
-    }
-    echo "." >&$ssl_in || {
-        _openssl_v_echo "failed to write DATA terminator"
+    # 7. Send the message body (with LF line endings), then the SMTP DATA
+    # terminator "." on its own line.
+    # openssl s_client -crlf converts LF → CRLF for the SMTP protocol.
+    {
+        _abf_build_mime_message "$subject" "$body" "$service"
+        echo "."
+    } >&$ssl_in || {
+        _openssl_v_echo "failed to write message body or DATA terminator"
         _abf_openssl_close
         return 1
     }
@@ -710,14 +702,13 @@ _abf_sendmail_sendmail() {
     local body="$2"
     local service="$3"
 
-    local msg
-    msg=$(_abf_build_mime_message "$subject" "$body" "$service")
-
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  sendmail: command: /usr/sbin/sendmail -t" >&2
+    local sendmail_bin
+    sendmail_bin=$(command -v sendmail 2>/dev/null || echo "/usr/sbin/sendmail")
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  sendmail: command: ${sendmail_bin} -t" >&2
 
     local stmp
     stmp=$(mktemp -t "abf-sendmail-err-XXXXXX")
-    printf '%s\r\n' "$msg" | /usr/sbin/sendmail -t 2>"$stmp"
+    _abf_build_mime_message "$subject" "$body" "$service" | "$sendmail_bin" -t 2>"$stmp"
     local rc=$?
 
     if [[ -s "$stmp" ]]; then

@@ -384,8 +384,13 @@ test_mime_message_has_crlf() {
 
     local msg
     msg=$(_abf_build_mime_message "Test" "Body" "svc")
-    # The MIME message uses literal \r\n (4 chars) which printf converts to CRLF
-    assert_contains "$msg" '\r\n' "MIME message uses CRLF line endings"
+    # Pipe directly to preserve trailing newline (avoids $(...) stripping)
+    local raw
+    raw=$(_abf_build_mime_message "Test" "Body" "svc")
+    # _abf_mime_append uses LF ($'\n') line endings; openssl s_client -crlf
+    # converts LF → CRLF for SMTP.  The trailing \n is stripped by $(...),
+    # so check for LF before the final line.
+    assert_contains "$raw" $'\n' "MIME message uses line endings"
 }
 
 test_mime_message_has_mime_version() {
@@ -604,6 +609,7 @@ test_verbose_dispatch_prints_backend_names() {
     # immediately so the FIFO reader gets EOF.
     cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
 #!/bin/bash
+cat > /dev/null  # drain stdin to avoid SIGPIPE in the writer
 exit 1
 SCRIPT
     # Openssl mock: exit immediately — FIFO writer closes, reader gets EOF
@@ -660,6 +666,7 @@ test_verbose_msmtp_shows_accepted() {
 
     cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
 #!/bin/bash
+cat > /dev/null
 exit 0
 SCRIPT
     chmod +x "${MOCK_BINDIR}/msmtp"
