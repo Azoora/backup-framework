@@ -351,3 +351,35 @@ test_status_json_output_multiple_services() {
     assert_contains "$output" '"storage"' "JSON has storage"
     assert_contains "$output" '"notifications"' "JSON has notifications"
 }
+
+# Regression: Bug 2 — _abf_status_get_snapshot_time must return 0 when repo is empty
+# to avoid triggering set -Eeuo pipefail in the CLI
+test_status_get_snapshot_time_returns_zero_on_empty_repo() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/scheduler.sh"
+    source "${ABF_ROOT}/core/core.sh"
+    source "${ABF_ROOT}/core/status.sh"
+
+    local result
+    local rc=0
+    result=$(_abf_status_get_snapshot_time "test-svc" "") || rc=$?
+    assert_eq "0" "$rc" "Exit code must be 0 when repo is empty"
+    assert_eq "" "$result" "Output must be empty when repo is empty"
+}
+
+# Regression: Bug 2 — _abf_status_get_snapshot_time must return 0 when restic is missing
+test_status_get_snapshot_time_returns_zero_without_restic() {
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/scheduler.sh"
+    source "${ABF_ROOT}/core/core.sh"
+    source "${ABF_ROOT}/core/status.sh"
+
+    local result
+    local rc=0
+    # Provide a non-empty repo path but restic unavailable
+    result=$(_abf_status_get_snapshot_time "test-svc" "/tmp/fake-repo") || rc=$?
+    assert_eq "0" "$rc" "Exit code must be 0 when restic is not available"
+    assert_eq "" "$result" "Output must be empty when restic is not available"
+}

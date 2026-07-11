@@ -558,7 +558,6 @@ abf_schedule_global_enable() {
         "[Timer]" \
         "OnCalendar=${calendar}" \
         "Persistent=true" \
-        "RandomizedDelaySec=1800" \
         "" \
         "[Install]" \
         "WantedBy=timers.target"
@@ -635,8 +634,11 @@ abf_schedule_global_status() {
     elif [[ "$calendar" =~ ^[A-Z][a-z]+\ \*-\*-\*\ ([0-9]{2}):([0-9]{2}):00$ ]]; then
         time_part="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
         description="Weekly at ${time_part}"
-    else
-        description="${calendar}"
+    fi
+
+    # Fall back to saved config when systemctl parsing failed
+    if [[ -z "$description" ]]; then
+        description=$(_abf_describe_schedule "$SCHEDULE_FREQUENCY" "$SCHEDULE_TIME" "0")
     fi
 
     local is_on="No"

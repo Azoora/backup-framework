@@ -17,17 +17,17 @@ _abf_status_get_snapshot_time() {
 
     if [[ -z "$repo" ]]; then
         echo ""
-        return 1
+        return 0
     fi
 
     if ! command -v restic &>/dev/null; then
         echo ""
-        return 1
+        return 0
     fi
 
     if [[ -z "${ABF_RESTIC_PASSWORD_FILE:-}" ]] || [[ ! -r "${ABF_RESTIC_PASSWORD_FILE:-}" ]]; then
         echo ""
-        return 1
+        return 0
     fi
 
     local time_str
@@ -37,7 +37,7 @@ _abf_status_get_snapshot_time() {
 
     if [[ -z "$time_str" ]]; then
         echo ""
-        return 1
+        return 0
     fi
 
     echo "$time_str"

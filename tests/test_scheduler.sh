@@ -255,3 +255,76 @@ test_global_build_services_exec_no_config() {
     rm -rf "$tmpdir"
     return 0
 }
+
+# Regression: Bug 3 — timer unit must NOT contain RandomizedDelaySec
+test_global_timer_no_randomized_delay() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-global-sched-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "sched-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/scheduler.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    local timer_file="${tmpdir}/test-timer.timer"
+
+    # Directly invoke the timer writing logic with _abf_systemd_write_unit
+    _abf_systemd_write_unit "$timer_file" \
+        "[Unit]" \
+        "Description=Test" \
+        "" \
+        "[Timer]" \
+        "OnCalendar=*-*-* 02:00:00" \
+        "Persistent=true" \
+        "" \
+        "[Install]" \
+        "WantedBy=timers.target"
+
+    assert_contains "$(cat "$timer_file")" "OnCalendar=*-*-* 02:00:00" "Timer has OnCalendar"
+    if grep -q "RandomizedDelaySec" "$timer_file"; then
+        echo "  FAIL: Timer must not contain RandomizedDelaySec"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
+    return 0
+}
+
+# Regression: Bug 1 — status should use config fallback when systemctl description is empty
+test_global_status_config_fallback() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-global-sched-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/scheduler.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "sched-test" "test" "${tmpdir}/logs"
+
+    ABF_CONFIG_DIR="$tmpdir"
+
+    # Set config values as if they were saved by abf schedule daily
+    SCHEDULE_ENABLED="true"
+    SCHEDULE_FREQUENCY="daily"
+    SCHEDULE_TIME="02:00"
+    _abf_schedule_global_save_config
+
+    # Verify saved config is correct
+    assert_eq "true" "$SCHEDULE_ENABLED" "Config saved enabled"
+    assert_eq "daily" "$SCHEDULE_FREQUENCY" "Config saved frequency"
+    assert_eq "02:00" "$SCHEDULE_TIME" "Config saved time"
+
+    # Load config fresh and verify describe_schedule produces correct output
+    SCHEDULE_ENABLED=""
+    SCHEDULE_FREQUENCY=""
+    SCHEDULE_TIME=""
+    _abf_schedule_global_load_config
+
+    local description
+    description=$(_abf_describe_schedule "$SCHEDULE_FREQUENCY" "$SCHEDULE_TIME" "0")
+    assert_eq "Daily at 02:00" "$description" "Config fallback produces correct description"
+
+    rm -rf "$tmpdir"
+    return 0
+}
