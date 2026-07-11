@@ -576,7 +576,7 @@ _abf_sync_destination() {
     }
 
     abf_log_info "Destination '${dest}': syncing repository"
-    if destination_sync "$repo_url"; then
+    if destination_sync "$repo_url" "$service_name"; then
         abf_log_success "Destination '${dest}': sync succeeded"
         return 0
     else

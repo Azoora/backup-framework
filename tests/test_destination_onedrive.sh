@@ -32,7 +32,7 @@ test_onedrive_destination_defaults() {
     source "${ABF_ROOT}/destinations/onedrive/module.sh"
 
     assert_eq "OneDrive" "$ONEDRIVE_REMOTE" "Default remote name"
-    assert_eq "Backups/BackupFramework" "$ONEDRIVE_PATH" "Default remote path"
+    assert_eq "Backups" "$ONEDRIVE_PATH" "Default remote path"
 
     return 0
 }

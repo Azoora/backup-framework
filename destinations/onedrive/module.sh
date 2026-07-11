@@ -8,7 +8,7 @@
 # ---------------------------------------------------------------------------
 
 ONEDRIVE_REMOTE="${ONEDRIVE_REMOTE:-OneDrive}"
-ONEDRIVE_PATH="${ONEDRIVE_PATH:-Backups/BackupFramework}"
+ONEDRIVE_PATH="${ONEDRIVE_PATH:-Backups}"
 
 destination_name() {
     echo "OneDrive"
@@ -32,6 +32,7 @@ destination_check() {
 
 destination_sync() {
     local repo_path="$1"
+    local service_name="${2:-}"
 
     if ! command -v rclone &>/dev/null; then
         abf_log_error "OneDrive destination: rclone not found"
@@ -44,16 +45,25 @@ destination_sync() {
         return 1
     fi
 
-    abf_log_info "OneDrive destination: syncing to ${ONEDRIVE_REMOTE}:${ONEDRIVE_PATH}"
+    local dest_path
+    if [[ -n "$service_name" ]]; then
+        local display_name
+        display_name=$(_abf_service_display_name "$service_name")
+        dest_path="Backups/$(hostname)/${display_name}"
+    else
+        dest_path="${ONEDRIVE_PATH}"
+    fi
+
+    abf_log_info "OneDrive destination: syncing to ${ONEDRIVE_REMOTE}:${dest_path}"
 
     if [[ "$repo_path" == /* ]]; then
-        rclone sync "$repo_path/" "${ONEDRIVE_REMOTE}:${ONEDRIVE_PATH}/" 2>/dev/null || {
+        rclone sync "$repo_path/" "${ONEDRIVE_REMOTE}:${dest_path}/" 2>/dev/null || {
             abf_log_error "OneDrive destination: rclone sync failed"
             return 1
         }
     elif [[ "$repo_path" == rclone:* ]]; then
         local src_remote="${repo_path#rclone:}"
-        rclone sync "${src_remote}/" "${ONEDRIVE_REMOTE}:${ONEDRIVE_PATH}/" 2>/dev/null || {
+        rclone sync "${src_remote}/" "${ONEDRIVE_REMOTE}:${dest_path}/" 2>/dev/null || {
             abf_log_error "OneDrive destination: rclone sync failed"
             return 1
         }
@@ -62,7 +72,7 @@ destination_sync() {
         return 1
     fi
 
-    if ! rclone ls "${ONEDRIVE_REMOTE}:${ONEDRIVE_PATH}/config" &>/dev/null; then
+    if ! rclone ls "${ONEDRIVE_REMOTE}:${dest_path}/config" &>/dev/null; then
         abf_log_error "OneDrive destination: sync verification failed — config file missing"
         return 1
     fi

@@ -33,14 +33,24 @@ destination_check() {
 
 destination_sync() {
     local repo_path="$1"
+    local service_name="${2:-}"
 
     if [[ "$repo_path" != /* ]]; then
         abf_log_warning "Local destination: source is not a local path — skipping"
         return 1
     fi
 
+    local dest_path
+    if [[ -n "$service_name" ]]; then
+        local display_name
+        display_name=$(_abf_service_display_name "$service_name")
+        dest_path="${LOCAL_DESTINATION_PATH}/${display_name}"
+    else
+        dest_path="${LOCAL_DESTINATION_PATH}"
+    fi
+
     local dest_dir
-    dest_dir=$(dirname "$LOCAL_DESTINATION_PATH")
+    dest_dir=$(dirname "$dest_path")
 
     if [[ ! -d "$dest_dir" ]]; then
         abf_log_info "Local destination: creating parent directory ${dest_dir}"
@@ -55,13 +65,13 @@ destination_sync() {
         return 1
     fi
 
-    abf_log_info "Local destination: syncing to ${LOCAL_DESTINATION_PATH}"
-    rsync -a --delete "$repo_path/" "$LOCAL_DESTINATION_PATH/" 2>/dev/null || {
+    abf_log_info "Local destination: syncing to ${dest_path}"
+    rsync -a --delete "$repo_path/" "$dest_path/" 2>/dev/null || {
         abf_log_error "Local destination: rsync failed"
         return 1
     }
 
-    if [[ ! -f "${LOCAL_DESTINATION_PATH}/config" ]]; then
+    if [[ ! -f "${dest_path}/config" ]]; then
         abf_log_error "Local destination: sync verification failed — config file missing"
         return 1
     fi
