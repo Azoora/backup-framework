@@ -276,30 +276,37 @@ _abf_sendmail() {
     local body="$2"
     local service="$3"
 
+    local v; v() { [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "$*" >&2; }
+
     # 1) msmtp with full SMTP config (best: handles TLS natively)
+    v "  backend[1] msmtp: $(command -v msmtp || echo 'not found')"
     if command -v msmtp &>/dev/null; then
         _abf_sendmail_msmtp "$subject" "$body" "$service" && return 0
     fi
 
     # 2) openssl s_client (direct SMTP with TLS)
+    v "  backend[2] openssl: $(command -v openssl || echo 'not found')"
     if command -v openssl &>/dev/null; then
         _abf_sendmail_openssl "$subject" "$body" "$service" && return 0
     fi
 
     # 3) sendmail (local MTA)
+    v "  backend[3] sendmail: $(command -v sendmail || echo 'not found')"
     if command -v sendmail &>/dev/null; then
         _abf_sendmail_sendmail "$subject" "$body" "$service" && return 0
     fi
 
     # 4) mail (local MTA)
+    v "  backend[4] mail: $(command -v mail || echo 'not found')"
     if command -v mail &>/dev/null; then
         _abf_sendmail_mail "$subject" "$body" "$service" && return 0
     fi
 
     # 5) bash /dev/tcp (plain SMTP, no TLS)
+    v "  backend[5] tcp: /dev/tcp"
     _abf_sendmail_tcp "$subject" "$body" "$service" && return 0
 
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  SMTP: No delivery method available" >&2
+    v "  SMTP: No delivery method succeeded"
     return 1
 }
 
@@ -312,8 +319,10 @@ _abf_sendmail_msmtp() {
     local body="$2"
     local service="$3"
 
+    local v; v() { [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: $*" >&2; }
+
     if [[ -z "${SMTP_HOST:-}" ]]; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: SMTP_HOST not set" >&2
+        v "SMTP_HOST not set, skipping"
         return 1
     fi
 
@@ -326,7 +335,7 @@ _abf_sendmail_msmtp() {
     done < <(_abf_split_recipients)
 
     if [[ ${#rcpt_args[@]} -eq 0 ]]; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: no recipients" >&2
+        v "no recipients"
         return 1
     fi
 
@@ -356,19 +365,39 @@ _abf_sendmail_msmtp() {
         fi
     fi
 
-    printf '%s\r\n' "$msg" | msmtp "${msmtp_args[@]}" "${rcpt_args[@]}" 2>/dev/null
+    local masked_args=()
+    local a
+    for a in "${msmtp_args[@]}"; do
+        if [[ "$a" == --passwordeval=cat* ]]; then
+            masked_args+=("--passwordeval=cat <password>")
+        else
+            masked_args+=("$a")
+        fi
+    done
+    v "command: msmtp ${masked_args[*]} ${rcpt_args[*]}"
+
+    local msmtp_stderr
+    msmtp_stderr=$(mktemp -t "abf-msmtp-err-XXXXXX")
+    printf '%s\r\n' "$msg" | msmtp "${msmtp_args[@]}" "${rcpt_args[@]}" 2>"$msmtp_stderr"
     local rc=$?
 
     if [[ -n "${pw_file:-}" ]]; then
         rm -f "${pw_file:-}"
     fi
 
+    if [[ -s "$msmtp_stderr" ]]; then
+        v "stderr: $(cat "$msmtp_stderr")"
+    fi
+    rm -f "$msmtp_stderr"
+
+    v "exit code: $rc"
+
     if [[ $rc -eq 0 ]]; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: delivery accepted" >&2
+        v "delivery accepted"
         return 0
     fi
 
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: delivery failed (exit $rc)" >&2
+    v "delivery failed"
     return 1
 }
 
@@ -381,7 +410,10 @@ _abf_sendmail_openssl() {
     local body="$2"
     local service="$3"
 
+    local v; v() { [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: $*" >&2; }
+
     if [[ -z "${SMTP_HOST:-}" ]]; then
+        v "SMTP_HOST not set, skipping"
         return 1
     fi
 
@@ -423,7 +455,29 @@ _abf_sendmail_openssl() {
     _abf_smtp_append_conv "."
     _abf_smtp_append_conv "QUIT"
 
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: connecting to ${SMTP_HOST}:${port}..." >&2
+    # Verbose: show the SMTP conversation (mask base64 password)
+    if [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]]; then
+        echo "  openssl: SMTP conversation to send ---" >&2
+        local auth_pending=0
+        # $conv uses literal \r\n strings — convert to newlines for display
+        while IFS= read -r line; do
+            if echo "$line" | grep -qE '^AUTH LOGIN$'; then
+                auth_pending=1
+                echo "  AUTH LOGIN" >&2
+            elif [[ $auth_pending -eq 1 ]]; then
+                # First base64 line after AUTH LOGIN = username
+                echo "  [base64 username]" >&2
+                auth_pending=2
+            elif [[ $auth_pending -eq 2 ]]; then
+                # Second base64 line = password — mask it
+                echo "  [base64 password masked]" >&2
+                auth_pending=0
+            else
+                echo "  ${line}" >&2
+            fi
+        done < <(echo "$conv" | sed 's/\\r\\n/\n/g')
+        echo "  ---" >&2
+    fi
 
     local openssl_args=(
         "-connect" "${SMTP_HOST}:${port}"
@@ -434,21 +488,57 @@ _abf_sendmail_openssl() {
 
     # STARTTLS for port 587 with TLS enabled
     if [[ "${SMTP_TLS:-false}" == "true" ]] && [[ "$port" == "587" ]]; then
+        v "using STARTTLS (port 587)"
         openssl_args+=("-starttls" "smtp")
+    elif [[ "${SMTP_TLS:-false}" == "true" ]]; then
+        v "using implicit TLS (port ${port})"
+    else
+        v "plain text (no TLS)"
     fi
 
-    # Send conversation and capture response
+    v "connecting to ${SMTP_HOST}:${port}..."
+
+    local openssl_stderr
+    openssl_stderr=$(mktemp -t "abf-openssl-err-XXXXXX")
+
+    # Send conversation and capture response (preserve stderr for diagnostics)
     local response
-    response=$(printf '%s' "$conv" | openssl s_client "${openssl_args[@]}" 2>/dev/null)
+    response=$(printf '%s' "$conv" | openssl s_client "${openssl_args[@]}" 2>"$openssl_stderr")
     local rc=$?
 
+    local err_output=""
+    if [[ -s "$openssl_stderr" ]]; then
+        err_output=$(cat "$openssl_stderr")
+    fi
+    rm -f "$openssl_stderr"
+
     if [[ $rc -ne 0 ]]; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: connection failed (exit $rc)" >&2
+        v "connection failed (exit $rc)"
+        if [[ -n "$err_output" ]]; then
+            if [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]]; then
+                echo "  openssl: stderr ---" >&2
+                echo "$err_output" | sed 's/^/  /' >&2
+                echo "  ---" >&2
+            fi
+            # Extract the most relevant error line
+            local err_line
+            err_line=$(echo "$err_output" | grep -iE 'error|failed|refused|timeout|connect|certificate' | head -1)
+            if [[ -n "$err_line" ]]; then
+                v "error: ${err_line}"
+            fi
+        fi
         return 1
     fi
 
     if [[ -z "$response" ]]; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: empty response" >&2
+        v "empty response from server"
+        if [[ -n "$err_output" ]]; then
+            if [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]]; then
+                echo "  openssl: stderr ---" >&2
+                echo "$err_output" | sed 's/^/  /' >&2
+                echo "  ---" >&2
+            fi
+        fi
         return 1
     fi
 
@@ -461,14 +551,19 @@ _abf_sendmail_openssl() {
     # Check for final success after DATA terminator
     # After ".", server returns "250" if message was accepted
     if _abf_smtp_response_has_code "$response" "250" "after data"; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: message accepted (250)" >&2
+        v "message accepted (250)"
         return 0
     fi
 
-    # Extract error code for diagnostics
-    local err_code
-    err_code=$(echo "$response" | grep -oE '[0-9]{3}' | tail -1)
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: SMTP error (code: ${err_code:-unknown})" >&2
+    # Extract the SMTP error for diagnostics
+    local err_message=""
+    err_message=$(echo "$response" | grep -oE '[0-9]{3} .*' | tail -1)
+    if [[ -n "$err_message" ]]; then
+        v "SMTP rejected: ${err_message}"
+    else
+        v "SMTP rejected (no recognizable error code)"
+    fi
+
     return 1
 }
 
@@ -531,11 +626,31 @@ _abf_sendmail_sendmail() {
     local body="$2"
     local service="$3"
 
+    local v; v() { [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  sendmail: $*" >&2; }
+
     local msg
     msg=$(_abf_build_mime_message "$subject" "$body" "$service")
-    printf '%s\r\n' "$msg" | /usr/sbin/sendmail -t 2>/dev/null && return 0
 
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  sendmail: delivery failed" >&2
+    v "command: /usr/sbin/sendmail -t"
+
+    local stmp
+    stmp=$(mktemp -t "abf-sendmail-err-XXXXXX")
+    printf '%s\r\n' "$msg" | /usr/sbin/sendmail -t 2>"$stmp"
+    local rc=$?
+
+    if [[ -s "$stmp" ]]; then
+        v "stderr: $(cat "$stmp")"
+    fi
+    rm -f "$stmp"
+
+    v "exit code: $rc"
+
+    if [[ $rc -eq 0 ]]; then
+        v "delivery accepted"
+        return 0
+    fi
+
+    v "delivery failed"
     return 1
 }
 
@@ -547,6 +662,8 @@ _abf_sendmail_mail() {
     local subject="$1"
     local body="$2"
     local service="$3"
+
+    local v; v() { [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  mail: $*" >&2; }
 
     local from
     from=$(_abf_format_from)
@@ -565,6 +682,7 @@ _abf_sendmail_mail() {
     done < <(_abf_split_recipients)
 
     if [[ -z "$first_rcpt" ]]; then
+        v "no recipients"
         return 1
     fi
 
@@ -573,9 +691,31 @@ _abf_sendmail_mail() {
         cc_arg=$(IFS=,; echo "${cc_rcpts[*]}")
     fi
 
-    printf '%s\n' "$body" | mail -s "$subject" -a "From: ${from}" ${cc_arg:+-c "$cc_arg"} "$first_rcpt" 2>/dev/null && return 0
+    local mail_cmd=("mail" "-s" "$subject" "-a" "From: ${from}")
+    [[ -n "$cc_arg" ]] && mail_cmd+=("-c" "$cc_arg")
+    mail_cmd+=("$first_rcpt")
 
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  mail: delivery failed" >&2
+    v "command: ${mail_cmd[*]}"
+    v "body: piped via stdin"
+
+    local mtmp
+    mtmp=$(mktemp -t "abf-mail-err-XXXXXX")
+    printf '%s\n' "$body" | "${mail_cmd[@]}" 2>"$mtmp"
+    local rc=$?
+
+    if [[ -s "$mtmp" ]]; then
+        v "stderr: $(cat "$mtmp")"
+    fi
+    rm -f "$mtmp"
+
+    v "exit code: $rc"
+
+    if [[ $rc -eq 0 ]]; then
+        v "delivery accepted"
+        return 0
+    fi
+
+    v "delivery failed"
     return 1
 }
 
@@ -590,7 +730,10 @@ _abf_sendmail_tcp() {
     local body="$2"
     local service="$3"
 
+    local v; v() { [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: $*" >&2; }
+
     if [[ -z "${SMTP_HOST:-}" ]]; then
+        v "SMTP_HOST not set, skipping"
         return 1
     fi
 
@@ -599,15 +742,22 @@ _abf_sendmail_tcp() {
     local from_header
     from_header=$(_abf_format_from)
 
-    # TLS is not possible with bash /dev/tcp — refuse silently so higher
+    # TLS is not possible with bash /dev/tcp — refuse so higher
     # backends (openssl, msmtp) get a chance instead.
     if [[ "${SMTP_TLS:-false}" == "true" ]]; then
+        v "TLS enabled — /dev/tcp cannot do TLS, skipping"
         return 1
     fi
 
-    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: connecting to ${SMTP_HOST}:${port}..." >&2
+    v "connecting to ${SMTP_HOST}:${port}..."
 
-    exec 9<>"/dev/tcp/${SMTP_HOST}/${port}" 2>/dev/null || return 1
+    exec 9<>"/dev/tcp/${SMTP_HOST}/${port}" 2>/dev/null
+    local rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        v "connection failed (exit $rc)"
+        return 1
+    fi
 
     local ok=true
 
@@ -628,7 +778,7 @@ _abf_sendmail_tcp() {
     done < <(_abf_split_recipients)
 
     if [[ $rcpt_count -eq 0 ]]; then
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: no recipients" >&2
+        v "no recipients"
         exec 9>&-
         return 1
     fi
@@ -672,11 +822,11 @@ _abf_sendmail_tcp() {
             fi
         done 2>/dev/null || true
 
-        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: data response: ${data_response}" >&2
+        v "data response: ${data_response}"
 
         local data_code="${data_response:0:3}"
         if [[ "$data_code" != "250" ]]; then
-            [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: message rejected (${data_response})" >&2
+            v "message rejected (${data_response})"
             ok=false
         fi
     fi

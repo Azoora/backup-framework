@@ -568,3 +568,306 @@ test_notify_send_test_email_structure() {
     assert_contains "$captured" "TEST" "Test email subject contains TEST"
     assert_contains "$captured" "notification-test" "Test email service name"
 }
+
+# ------------------------------------------------------------------
+# Verbose mode tests
+# ------------------------------------------------------------------
+
+# Set up a mock PATH so we can intercept backend executables
+_abf_verbose_setup() {
+    _abf_notify_setup
+    export ABF_SMTP_VERBOSE="true"
+    export SMTP_HOST="smtp.test.com"
+    export SMTP_PORT="587"
+    export SMTP_USER="user@test.com"
+    export SMTP_PASS="secret"
+    export SMTP_FROM_NAME="Tester"
+    export SMTP_FROM="tester@test.com"
+    export SMTP_TO="admin@test.com"
+    export SMTP_TLS="false"
+    SMTP_ENABLED="true"
+
+    # Build a mock PATH at the front that we control
+    MOCK_BINDIR=$(mktemp -d -t "abf-mock-bin-XXXXXX")
+    PATH="${MOCK_BINDIR}:${PATH}"
+}
+
+_abf_verbose_teardown() {
+    rm -rf "${MOCK_BINDIR:-/dev/null}"
+}
+
+test_verbose_dispatch_prints_backend_names() {
+    _abf_verbose_setup
+
+    # Mock all backends to fail so we see all names
+    cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
+#!/bin/bash
+exit 1
+SCRIPT
+    cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
+#!/bin/bash
+exit 1
+SCRIPT
+    cat > "${MOCK_BINDIR}/sendmail" <<'SCRIPT'
+#!/bin/bash
+exit 1
+SCRIPT
+    cat > "${MOCK_BINDIR}/mail" <<'SCRIPT'
+#!/bin/bash
+exit 1
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/msmtp" "${MOCK_BINDIR}/openssl" "${MOCK_BINDIR}/sendmail" "${MOCK_BINDIR}/mail"
+
+    local output
+    output=$(_abf_sendmail "Test Subj" "Test Body" "test-svc" 2>&1 || true)
+
+    assert_contains "$output" "backend[1] msmtp" "Dispatch prints msmtp backend"
+    assert_contains "$output" "backend[2] openssl" "Dispatch prints openssl backend"
+    assert_contains "$output" "backend[3] sendmail" "Dispatch prints sendmail backend"
+    assert_contains "$output" "backend[4] mail" "Dispatch prints mail backend"
+    assert_contains "$output" "backend[5] tcp" "Dispatch prints tcp backend"
+    assert_contains "$output" "No delivery method succeeded" "Dispatch prints failure summary"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_msmtp_shows_command_and_stderr() {
+    _abf_verbose_setup
+
+    cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
+#!/bin/bash
+echo "msmtp: connection refused" >&2
+exit 1
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/msmtp"
+
+    local output
+    output=$(_abf_sendmail_msmtp "Test" "Body" "svc" 2>&1 || true)
+
+    assert_contains "$output" "command: msmtp" "msmtp verbose shows command"
+    assert_contains "$output" "stderr: msmtp: connection refused" "msmtp verbose shows stderr"
+    assert_contains "$output" "exit code: 1" "msmtp verbose shows exit code"
+    assert_contains "$output" "delivery failed" "msmtp verbose shows failure"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_msmtp_shows_accepted() {
+    _abf_verbose_setup
+
+    cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
+#!/bin/bash
+exit 0
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/msmtp"
+
+    local output
+    output=$(_abf_sendmail_msmtp "Test" "Body" "svc" 2>&1 || true)
+
+    assert_contains "$output" "delivery accepted" "msmtp verbose shows accepted"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_openssl_shows_conversation_and_response() {
+    _abf_verbose_setup
+
+    cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
+#!/bin/bash
+# Simulate a full SMTP conversation response
+cat <<'RESP'
+220 smtp.test.com ESMTP
+250-localhost
+250-AUTH LOGIN PLAIN
+250 OK
+334 VXNlcm5hbWU6
+334 UGFzc3dvcmQ6
+235 Authentication successful
+250 Sender OK
+250 Recipient OK
+354 Enter message, ending with "." on a line by itself
+250 OK: Message accepted
+221 Bye
+RES
+exit 0
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/openssl"
+
+    local output
+    output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
+
+    assert_contains "$output" "SMTP conversation to send" "openssl verbose shows conversation header"
+    assert_contains "$output" "EHLO localhost" "openssl verbose shows EHLO"
+    assert_contains "$output" "AUTH LOGIN" "openssl verbose shows AUTH"
+    assert_contains "$output" "MAIL FROM" "openssl verbose shows MAIL FROM"
+    assert_contains "$output" "RCPT TO" "openssl verbose shows RCPT TO"
+    assert_contains "$output" "message accepted (250)" "openssl verbose shows acceptance"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_openssl_masks_password() {
+    _abf_verbose_setup
+
+    cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
+#!/bin/bash
+cat <<'RESP'
+220 smtp.test.com ESMTP
+250-localhost
+235 Authentication successful
+250 Sender OK
+250 Recipient OK
+354 Enter message
+250 OK
+221 Bye
+RES
+exit 0
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/openssl"
+
+    local output
+    output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
+
+    # The password base64 should NOT appear raw — the masked line replaces it
+    assert_contains "$output" "password masked" "openssl verbose masks password"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_openssl_shows_connection_error() {
+    _abf_verbose_setup
+
+    cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
+#!/bin/bash
+echo "connect: Connection refused" >&2
+exit 1
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/openssl"
+
+    local output
+    output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
+
+    assert_contains "$output" "connection failed" "openssl verbose shows connection failed"
+    assert_contains "$output" "Connection refused" "openssl verbose shows stderr error"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_openssl_shows_smtp_rejection() {
+    _abf_verbose_setup
+
+    cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
+#!/bin/bash
+cat <<'RESP'
+220 smtp.test.com ESMTP
+250-localhost
+250-AUTH LOGIN PLAIN
+250 OK
+334 VXNlcm5hbWU6
+334 UGFzc3dvcmQ6
+535 5.7.8 Authentication credentials invalid
+250 Sender OK
+250 Recipient OK
+354 Enter message
+550 5.1.1 Recipient rejected
+221 Bye
+RES
+exit 0
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/openssl"
+
+    local output
+    output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
+
+    assert_contains "$output" "SMTP rejected" "openssl verbose shows rejection"
+    assert_contains "$output" "550" "openssl verbose includes error code"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_tcp_skips_when_tls_enabled() {
+    _abf_verbose_setup
+
+    SMTP_TLS="true"
+    SMTP_PORT="587"
+
+    local output
+    output=$(_abf_sendmail_tcp "Test" "Body" "svc" 2>&1 || true)
+
+    assert_contains "$output" "cannot do TLS" "tcp verbose explains TLS skip"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_tcp_shows_commands() {
+    _abf_verbose_setup
+
+    # Verify _abf_smtp_tcp_cmd prints the >> command prefix
+    # Use a connected pipe pair to simulate socket behavior
+    local tmpf
+    tmpf=$(mktemp -t "abf-tcp-test-XXXXXX")
+    # Write a response first, then open fd for both rw
+    printf '250 OK\r\n' > "$tmpf"
+    exec 9<>"$tmpf"
+
+    local output
+    output=$(_abf_smtp_tcp_cmd 9 "EHLO localhost" "250" 2>&1 || true)
+    assert_contains "$output" ">> EHLO localhost" "tcp_cmd verbose shows sent command"
+
+    exec 9>&-
+    rm -f "$tmpf"
+
+    _abf_verbose_teardown
+}
+
+test_verbose_disabled_produces_no_output() {
+    _abf_notify_setup
+
+    export ABF_SMTP_VERBOSE="false"
+    export SMTP_HOST="smtp.test.com"
+    export SMTP_PORT="587"
+    export SMTP_FROM="tester@test.com"
+    export SMTP_TO="admin@test.com"
+    SMTP_ENABLED="true"
+
+    # Mock msmtp to succeed
+    MOCK_BINDIR=$(mktemp -d -t "abf-mock-bin-XXXXXX")
+    cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
+#!/bin/bash
+exit 0
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/msmtp"
+    PATH="${MOCK_BINDIR}:${PATH}"
+
+    local output
+    output=$(_abf_sendmail "Subj" "Body" "svc" 2>&1 || true)
+    assert_eq "" "$output" "No verbose output when ABF_SMTP_VERBOSE=false"
+
+    rm -rf "${MOCK_BINDIR}"
+}
+
+test_verbose_disabled_suppresses_backend_details() {
+    _abf_notify_setup
+
+    export ABF_SMTP_VERBOSE="false"
+    export SMTP_HOST="smtp.test.com"
+    export SMTP_PORT="587"
+    export SMTP_FROM="tester@test.com"
+    export SMTP_TO="admin@test.com"
+    SMTP_ENABLED="true"
+
+    MOCK_BINDIR=$(mktemp -d -t "abf-mock-bin-XXXXXX")
+    cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
+#!/bin/bash
+echo "internal error" >&2
+exit 1
+SCRIPT
+    chmod +x "${MOCK_BINDIR}/msmtp"
+    PATH="${MOCK_BINDIR}:${PATH}"
+
+    local output
+    output=$(_abf_sendmail_msmtp "Subj" "Body" "svc" 2>&1 || true)
+    assert_eq "" "$output" "No verbose msmtp output when ABF_SMTP_VERBOSE=false"
+
+    rm -rf "${MOCK_BINDIR}"
+}

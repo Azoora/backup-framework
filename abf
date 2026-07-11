@@ -320,15 +320,18 @@ _abf_main() {
             ;;
         notify)
             local verbose_smtp="false"
-            if [[ "${1:-}" == "--verbose" ]] || [[ "${1:-}" == "-v" ]]; then
-                verbose_smtp="true"
-                shift
-            fi
-            if [[ "${1:-}" != "test" ]]; then
+            local cmd=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --verbose|-v) verbose_smtp="true"; shift ;;
+                    test) cmd="test"; shift ;;
+                    *) echo "Usage: abf notify test [--verbose]" >&2; exit 1 ;;
+                esac
+            done
+            if [[ "$cmd" != "test" ]]; then
                 echo "Usage: abf notify test [--verbose]" >&2
                 exit 1
             fi
-            shift
             if [[ "$verbose_smtp" == "true" ]] || [[ "${ABF_VERBOSE:-false}" == "true" ]]; then
                 export ABF_SMTP_VERBOSE="true"
             fi
