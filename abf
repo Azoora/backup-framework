@@ -319,11 +319,19 @@ _abf_main() {
             abf_doctor_run "$json_mode"
             ;;
         notify)
+            local verbose_smtp="false"
+            if [[ "${1:-}" == "--verbose" ]] || [[ "${1:-}" == "-v" ]]; then
+                verbose_smtp="true"
+                shift
+            fi
             if [[ "${1:-}" != "test" ]]; then
-                echo "Usage: abf notify test" >&2
+                echo "Usage: abf notify test [--verbose]" >&2
                 exit 1
             fi
             shift
+            if [[ "$verbose_smtp" == "true" ]] || [[ "${ABF_VERBOSE:-false}" == "true" ]]; then
+                export ABF_SMTP_VERBOSE="true"
+            fi
             if [[ "${SMTP_ENABLED:-false}" != "true" ]]; then
                 echo "SMTP notifications are disabled. Enable by setting SMTP_ENABLED=\"true\" in smtp.conf"
                 exit 1

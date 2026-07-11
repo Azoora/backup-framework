@@ -2,8 +2,12 @@
 # notify.sh  --  Email notification system
 #
 # Sends SMTP email notifications on backup success/failure.
-# Uses the `mail` command (mailutils) if available, otherwise falls back
-# to a bash-native SMTP client via /dev/tcp.
+# Delivery backends (tried in order):
+#   1. msmtp  -- proper SMTP client with TLS (best)
+#   2. openssl s_client -- direct SMTP with TLS via openssl
+#   3. sendmail  -- local MTA
+#   4. mail  -- local MTA
+#   5. bash /dev/tcp -- plain SMTP only (no TLS, port 25 only)
 # ---------------------------------------------------------------------------
 
 # ------------------------------------------------------------------
@@ -200,6 +204,10 @@ _abf_read_log_for_attachment() {
     cat "$log_file"
 }
 
+# ------------------------------------------------------------------
+# Build RFC-compliant MIME message (with CRLF)
+# ------------------------------------------------------------------
+
 _abf_build_mime_message() {
     local subject="$1"
     local body="$2"
@@ -214,41 +222,53 @@ _abf_build_mime_message() {
     log_content=$(_abf_read_log_for_attachment) || true
 
     local boundary="abf-boundary-$(date +%s)-$$"
-    local message=""
+    local date_header
+    date_header=$(date -R 2>/dev/null || date +"%a, %d %b %Y %H:%M:%S %z")
 
-    message+="From: ${from}\r\n"
-    message+="To: ${recipients}\r\n"
-    message+="Subject: ${subject}\r\n"
-    message+="MIME-Version: 1.0\r\n"
+    local msg=""
+
+    _abf_mime_append "From: ${from}"
+    _abf_mime_append "To: ${recipients}"
+    _abf_mime_append "Subject: ${subject}"
+    _abf_mime_append "Date: ${date_header}"
+    _abf_mime_append "MIME-Version: 1.0"
 
     if [[ -n "$log_content" ]]; then
-        message+="Content-Type: multipart/mixed; boundary=\"${boundary}\"\r\n"
-        message+="\r\n"
-        message+="--${boundary}\r\n"
-        message+="Content-Type: text/plain; charset=UTF-8\r\n"
-        message+="Content-Transfer-Encoding: 7bit\r\n"
-        message+="\r\n"
-        message+="${body}\r\n"
-        message+="\r\n"
-        message+="--${boundary}\r\n"
-        message+="Content-Type: text/plain; charset=UTF-8\r\n"
-        message+="Content-Disposition: attachment; filename=\"${service}_backup.log\"\r\n"
-        message+="Content-Transfer-Encoding: base64\r\n"
-        message+="\r\n"
-        message+="$(echo "$log_content" | base64)\r\n"
-        message+="\r\n"
-        message+="--${boundary}--\r\n"
+        _abf_mime_append "Content-Type: multipart/mixed; boundary=\"${boundary}\""
+        _abf_mime_append ""
+        _abf_mime_append "--${boundary}"
+        _abf_mime_append "Content-Type: text/plain; charset=UTF-8"
+        _abf_mime_append "Content-Transfer-Encoding: 7bit"
+        _abf_mime_append ""
+        _abf_mime_append "$body"
+        _abf_mime_append ""
+        _abf_mime_append "--${boundary}"
+        _abf_mime_append "Content-Type: text/plain; charset=UTF-8"
+        _abf_mime_append "Content-Disposition: attachment; filename=\"${service}_backup.log\""
+        _abf_mime_append "Content-Transfer-Encoding: base64"
+        _abf_mime_append ""
+        _abf_mime_append "$(printf '%s' "$log_content" | base64)"
+        _abf_mime_append ""
+        _abf_mime_append "--${boundary}--"
     else
-        message+="Content-Type: text/plain; charset=UTF-8\r\n"
-        message+="\r\n"
-        message+="${body}\r\n"
+        _abf_mime_append "Content-Type: text/plain; charset=UTF-8"
+        _abf_mime_append ""
+        _abf_mime_append "${body}"
     fi
 
-    echo -e "$message"
+    printf '%s' "$msg"
 }
 
+_abf_mime_append() {
+    msg="${msg}${1}\r\n"
+}
+
+# ==================================================================
+# SMTP Delivery Backends
+# ==================================================================
+
 # ------------------------------------------------------------------
-# Internal: send email
+# _abf_sendmail  --  Main dispatch, tries backends in order
 # ------------------------------------------------------------------
 
 _abf_sendmail() {
@@ -256,66 +276,313 @@ _abf_sendmail() {
     local body="$2"
     local service="$3"
 
-    local from
-    from=$(_abf_format_from)
-
-    if command -v mail &>/dev/null; then
-        local first_rcpt=""
-        local cc_rcpts=()
-        local first=true
-        while IFS= read -r addr; do
-            [[ -z "$addr" ]] && continue
-            if $first; then
-                first_rcpt="$addr"
-                first=false
-            else
-                cc_rcpts+=("$addr")
-            fi
-        done < <(_abf_split_recipients)
-
-        if [[ -n "$first_rcpt" ]]; then
-            local cc_arg=""
-            if [[ ${#cc_rcpts[@]} -gt 0 ]]; then
-                cc_arg=$(IFS=,; echo "${cc_rcpts[*]}")
-            fi
-
-            local log_attach=""
-            log_attach=$(_abf_read_log_for_attachment) || true
-
-            if [[ -n "$log_attach" ]]; then
-                (echo "$body") | mail -s "$subject" -a "From: ${from}" -a "Content-Type: text/plain; charset=UTF-8" ${cc_arg:+-c "$cc_arg"} "$first_rcpt" 2>/dev/null && return 0
-            else
-                (echo "$body") | mail -s "$subject" -a "From: ${from}" ${cc_arg:+-c "$cc_arg"} "$first_rcpt" 2>/dev/null && return 0
-            fi
-        fi
-    fi
-
-    if command -v sendmail &>/dev/null; then
-        local msg
-        msg=$(_abf_build_mime_message "$subject" "$body" "$service")
-        echo -e "$msg" | /usr/sbin/sendmail -t 2>/dev/null && return 0
-    fi
-
+    # 1) msmtp with full SMTP config (best: handles TLS natively)
     if command -v msmtp &>/dev/null; then
-        local msg
-        msg=$(_abf_build_mime_message "$subject" "$body" "$service")
-        local rcpt_args=()
-        while IFS= read -r addr; do
-            [[ -n "$addr" ]] && rcpt_args+=("$addr")
-        done < <(_abf_split_recipients)
-        if [[ ${#rcpt_args[@]} -gt 0 ]]; then
-            echo -e "$msg" | msmtp --from="${SMTP_FROM}" "${rcpt_args[@]}" 2>/dev/null && return 0
-        fi
+        _abf_sendmail_msmtp "$subject" "$body" "$service" && return 0
     fi
 
+    # 2) openssl s_client (direct SMTP with TLS)
+    if command -v openssl &>/dev/null; then
+        _abf_sendmail_openssl "$subject" "$body" "$service" && return 0
+    fi
+
+    # 3) sendmail (local MTA)
+    if command -v sendmail &>/dev/null; then
+        _abf_sendmail_sendmail "$subject" "$body" "$service" && return 0
+    fi
+
+    # 4) mail (local MTA)
+    if command -v mail &>/dev/null; then
+        _abf_sendmail_mail "$subject" "$body" "$service" && return 0
+    fi
+
+    # 5) bash /dev/tcp (plain SMTP, no TLS)
     _abf_sendmail_tcp "$subject" "$body" "$service" && return 0
 
-    abf_log_warning "No email delivery method available"
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  SMTP: No delivery method available" >&2
     return 1
 }
 
 # ------------------------------------------------------------------
-# TCP SMTP (bash built-in /dev/tcp) with full auth and multiple recipients
+# Backend: msmtp with inline SMTP config
+# ------------------------------------------------------------------
+
+_abf_sendmail_msmtp() {
+    local subject="$1"
+    local body="$2"
+    local service="$3"
+
+    if [[ -z "${SMTP_HOST:-}" ]]; then
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: SMTP_HOST not set" >&2
+        return 1
+    fi
+
+    local msg
+    msg=$(_abf_build_mime_message "$subject" "$body" "$service")
+
+    local rcpt_args=()
+    while IFS= read -r addr; do
+        [[ -n "$addr" ]] && rcpt_args+=("$addr")
+    done < <(_abf_split_recipients)
+
+    if [[ ${#rcpt_args[@]} -eq 0 ]]; then
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: no recipients" >&2
+        return 1
+    fi
+
+    local msmtp_args=(
+        "--host=${SMTP_HOST}"
+        "--port=${SMTP_PORT:-587}"
+        "--from=${SMTP_FROM:-}"
+    )
+
+    if [[ "${SMTP_TLS:-false}" == "true" ]]; then
+        msmtp_args+=("--tls=on")
+        if [[ "${SMTP_PORT:-587}" == "587" ]]; then
+            msmtp_args+=("--tls-starttls=on")
+        fi
+    else
+        msmtp_args+=("--tls=off")
+    fi
+
+    if [[ -n "${SMTP_USER:-}" ]]; then
+        msmtp_args+=("--auth=login" "--user=${SMTP_USER}")
+        if [[ -n "${SMTP_PASS:-}" ]]; then
+            local pw_file
+            pw_file=$(mktemp -t "abf-msmtp-pw-XXXXXX")
+            printf '%s' "${SMTP_PASS}" > "$pw_file"
+            chmod 600 "$pw_file"
+            msmtp_args+=("--passwordeval=cat ${pw_file}")
+        fi
+    fi
+
+    printf '%s\r\n' "$msg" | msmtp "${msmtp_args[@]}" "${rcpt_args[@]}" 2>/dev/null
+    local rc=$?
+
+    if [[ -n "${pw_file:-}" ]]; then
+        rm -f "${pw_file:-}"
+    fi
+
+    if [[ $rc -eq 0 ]]; then
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: delivery accepted" >&2
+        return 0
+    fi
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  msmtp: delivery failed (exit $rc)" >&2
+    return 1
+}
+
+# ------------------------------------------------------------------
+# Backend: openssl s_client (TLS-capable direct SMTP)
+# ------------------------------------------------------------------
+
+_abf_sendmail_openssl() {
+    local subject="$1"
+    local body="$2"
+    local service="$3"
+
+    if [[ -z "${SMTP_HOST:-}" ]]; then
+        return 1
+    fi
+
+    local port="${SMTP_PORT:-587}"
+    local from="${SMTP_FROM:-}"
+    local from_header
+    from_header=$(_abf_format_from)
+    local recipients
+    recipients=$(paste -sd, <(_abf_split_recipients))
+
+    # Build the SMTP conversation (CRLF line endings)
+    local conv=""
+    _abf_smtp_append_conv "EHLO localhost"
+
+    if [[ -n "${SMTP_USER:-}" ]]; then
+        _abf_smtp_append_conv "AUTH LOGIN"
+        _abf_smtp_append_conv "$(printf '%s' "${SMTP_USER}" | base64 -w0)"
+        _abf_smtp_append_conv "$(printf '%s' "${SMTP_PASS}" | base64 -w0)"
+    fi
+
+    _abf_smtp_append_conv "MAIL FROM:<${from}>"
+
+    while IFS= read -r addr; do
+        [[ -n "$addr" ]] && _abf_smtp_append_conv "RCPT TO:<${addr}>"
+    done < <(_abf_split_recipients)
+
+    local date_header
+    date_header=$(date -R 2>/dev/null || date +"%a, %d %b %Y %H:%M:%S %z")
+
+    _abf_smtp_append_conv "DATA"
+    _abf_smtp_append_conv "From: ${from_header}"
+    _abf_smtp_append_conv "To: ${recipients}"
+    _abf_smtp_append_conv "Subject: ${subject}"
+    _abf_smtp_append_conv "Date: ${date_header}"
+    _abf_smtp_append_conv "MIME-Version: 1.0"
+    _abf_smtp_append_conv "Content-Type: text/plain; charset=UTF-8"
+    _abf_smtp_append_conv ""
+    _abf_smtp_append_conv "${body}"
+    _abf_smtp_append_conv "."
+    _abf_smtp_append_conv "QUIT"
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: connecting to ${SMTP_HOST}:${port}..." >&2
+
+    local openssl_args=(
+        "-connect" "${SMTP_HOST}:${port}"
+        "-crlf"
+        "-quiet"
+        "-no_ign_eof"
+    )
+
+    # STARTTLS for port 587 with TLS enabled
+    if [[ "${SMTP_TLS:-false}" == "true" ]] && [[ "$port" == "587" ]]; then
+        openssl_args+=("-starttls" "smtp")
+    fi
+
+    # Send conversation and capture response
+    local response
+    response=$(printf '%s' "$conv" | openssl s_client "${openssl_args[@]}" 2>/dev/null)
+    local rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: connection failed (exit $rc)" >&2
+        return 1
+    fi
+
+    if [[ -z "$response" ]]; then
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: empty response" >&2
+        return 1
+    fi
+
+    if [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]]; then
+        echo "  openssl: response ---" >&2
+        echo "$response" | sed 's/^/  /' >&2
+        echo "  ---" >&2
+    fi
+
+    # Check for final success after DATA terminator
+    # After ".", server returns "250" if message was accepted
+    if _abf_smtp_response_has_code "$response" "250" "after data"; then
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: message accepted (250)" >&2
+        return 0
+    fi
+
+    # Extract error code for diagnostics
+    local err_code
+    err_code=$(echo "$response" | grep -oE '[0-9]{3}' | tail -1)
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  openssl: SMTP error (code: ${err_code:-unknown})" >&2
+    return 1
+}
+
+_abf_smtp_append_conv() {
+    conv="${conv}${1}\r\n"
+}
+
+# ------------------------------------------------------------------
+# SMTP response parser: check that the last response before QUIT is 2xx
+# This is the critical check: after DATA + ".", the server must return 250.
+# ------------------------------------------------------------------
+
+_abf_smtp_response_has_code() {
+    local response="$1"
+    local target_code="$2"
+    local context="${3:-}"
+
+    # Find the response after "DATA" and the message terminator "."
+    # This is the response that indicates whether the server accepted the email.
+    # It will be a line like "250 OK" or "550 Rejected"
+
+    # Strategy: find the last "354" (DATA accepted) and check the next 2xx/3xx line
+    local data_line_found=false
+    local after_data_code=""
+
+    while IFS= read -r line; do
+        line=$(echo "$line" | tr -d '\r' | sed 's/^[[:space:]]*//')
+        [[ -z "$line" ]] && continue
+
+        local code="${line:0:3}"
+        # Skip openssl noise lines (depth=, verify, etc.)
+        if echo "$line" | grep -qE '^(depth=|verify |DONE|---)'; then
+            continue
+        fi
+        # Skip base64 auth blobs
+        if echo "$line" | grep -qE '^[A-Za-z0-9+/=]{20,}$'; then
+            continue
+        fi
+
+        if [[ "$code" == "354" ]]; then
+            data_line_found=true
+            after_data_code=""
+        elif $data_line_found && [[ "$code" =~ ^[0-9]{3}$ ]]; then
+            after_data_code="$code"
+            if [[ "$code" == "$target_code" ]]; then
+                return 0
+            fi
+        fi
+    done < <(echo "$response")
+
+    return 1
+}
+
+# ------------------------------------------------------------------
+# Backend: sendmail (local MTA)
+# ------------------------------------------------------------------
+
+_abf_sendmail_sendmail() {
+    local subject="$1"
+    local body="$2"
+    local service="$3"
+
+    local msg
+    msg=$(_abf_build_mime_message "$subject" "$body" "$service")
+    printf '%s\r\n' "$msg" | /usr/sbin/sendmail -t 2>/dev/null && return 0
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  sendmail: delivery failed" >&2
+    return 1
+}
+
+# ------------------------------------------------------------------
+# Backend: mail (local MTA)
+# ------------------------------------------------------------------
+
+_abf_sendmail_mail() {
+    local subject="$1"
+    local body="$2"
+    local service="$3"
+
+    local from
+    from=$(_abf_format_from)
+
+    local first_rcpt=""
+    local cc_rcpts=()
+    local first=true
+    while IFS= read -r addr; do
+        [[ -z "$addr" ]] && continue
+        if $first; then
+            first_rcpt="$addr"
+            first=false
+        else
+            cc_rcpts+=("$addr")
+        fi
+    done < <(_abf_split_recipients)
+
+    if [[ -z "$first_rcpt" ]]; then
+        return 1
+    fi
+
+    local cc_arg=""
+    if [[ ${#cc_rcpts[@]} -gt 0 ]]; then
+        cc_arg=$(IFS=,; echo "${cc_rcpts[*]}")
+    fi
+
+    printf '%s\n' "$body" | mail -s "$subject" -a "From: ${from}" ${cc_arg:+-c "$cc_arg"} "$first_rcpt" 2>/dev/null && return 0
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  mail: delivery failed" >&2
+    return 1
+}
+
+# ------------------------------------------------------------------
+# Backend: bash /dev/tcp (plain SMTP only, no TLS)
+# Only works for non-TLS connections (port 25). TLS is impossible
+# with bash's built-in TCP device.
 # ------------------------------------------------------------------
 
 _abf_sendmail_tcp() {
@@ -332,64 +599,139 @@ _abf_sendmail_tcp() {
     local from_header
     from_header=$(_abf_format_from)
 
+    # TLS is not possible with bash /dev/tcp — refuse silently so higher
+    # backends (openssl, msmtp) get a chance instead.
+    if [[ "${SMTP_TLS:-false}" == "true" ]]; then
+        return 1
+    fi
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: connecting to ${SMTP_HOST}:${port}..." >&2
+
     exec 9<>"/dev/tcp/${SMTP_HOST}/${port}" 2>/dev/null || return 1
 
-    _abf_smtp_cmd 9 "EHLO localhost"
-    if [[ "${SMTP_TLS:-false}" == "true" ]] && [[ "$port" == "587" ]]; then
-        _abf_smtp_cmd 9 "STARTTLS"
-    fi
+    local ok=true
+
+    _abf_smtp_tcp_cmd 9 "EHLO localhost" "250" || ok=false
     if [[ -n "${SMTP_USER:-}" ]]; then
-        _abf_smtp_cmd 9 "AUTH LOGIN"
-        _abf_smtp_cmd 9 "$(printf '%s' "${SMTP_USER}" | base64)"
-        _abf_smtp_cmd 9 "$(printf '%s' "${SMTP_PASS}" | base64)"
+        _abf_smtp_tcp_cmd 9 "AUTH LOGIN" "334" || ok=false
+        _abf_smtp_tcp_cmd 9 "$(printf '%s' "${SMTP_USER}" | base64 -w0)" "334" || ok=false
+        _abf_smtp_tcp_cmd 9 "$(printf '%s' "${SMTP_PASS}" | base64 -w0)" "235" || ok=false
     fi
 
-    _abf_smtp_cmd 9 "MAIL FROM:<${from}>"
+    _abf_smtp_tcp_cmd 9 "MAIL FROM:<${from}>" "250" || ok=false
 
     local rcpt_count=0
     while IFS= read -r addr; do
         [[ -z "$addr" ]] && continue
-        _abf_smtp_cmd 9 "RCPT TO:<${addr}>"
+        _abf_smtp_tcp_cmd 9 "RCPT TO:<${addr}>" "250" || ok=false
         ((rcpt_count++))
     done < <(_abf_split_recipients)
 
     if [[ $rcpt_count -eq 0 ]]; then
-        abf_log_warning "SMTP TCP: no recipients configured"
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: no recipients" >&2
         exec 9>&-
         return 1
     fi
 
-    _abf_smtp_cmd 9 "DATA"
+    _abf_smtp_tcp_cmd 9 "DATA" "354" || ok=false
 
-    local log_content
-    log_content=$(_abf_read_log_for_attachment) || true
+    if $ok; then
+        local date_header
+        date_header=$(date -R 2>/dev/null || date +"%a, %d %b %Y %H:%M:%S %z")
 
-    {
-        echo "From: ${from_header}"
-        echo "To: $(paste -sd, <(_abf_split_recipients))"
-        echo "Subject: ${subject}"
-        echo "Content-Type: text/plain; charset=UTF-8"
-        echo ""
-        echo "$body"
-        if [[ -n "$log_content" ]]; then
+        local log_content
+        log_content=$(_abf_read_log_for_attachment) || true
+
+        {
+            echo "From: ${from_header}"
+            echo "To: $(paste -sd, <(_abf_split_recipients))"
+            echo "Subject: ${subject}"
+            echo "Date: ${date_header}"
+            echo "MIME-Version: 1.0"
+            echo "Content-Type: text/plain; charset=UTF-8"
             echo ""
-            echo "--- Backup Log ---"
-            echo "$log_content"
-        fi
-        echo "."
-    } >&9
+            echo "$body"
+            if [[ -n "$log_content" ]]; then
+                echo ""
+                echo "--- Backup Log ---"
+                echo "$log_content"
+            fi
+            echo "."
+        } >&9
 
-    _abf_smtp_cmd 9 "QUIT"
+        # Read the response(s) after the data terminator
+        # The server returns "250 OK" if accepted
+        local data_response=""
+        local line
+        while IFS= read -r line <&9; do
+            line=$(echo "$line" | tr -d '\r')
+            data_response="$line"
+            # Multi-line responses end with "code SP message" (no hyphen)
+            if [[ "$line" =~ ^[0-9]{3}\  ]]; then
+                break
+            fi
+        done 2>/dev/null || true
+
+        [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: data response: ${data_response}" >&2
+
+        local data_code="${data_response:0:3}"
+        if [[ "$data_code" != "250" ]]; then
+            [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: message rejected (${data_response})" >&2
+            ok=false
+        fi
+    fi
+
+    _abf_smtp_tcp_cmd 9 "QUIT" "221" || true
 
     exec 9>&-
-    return 0
+
+    $ok && return 0
+    return 1
 }
 
-_abf_smtp_cmd() {
+# ------------------------------------------------------------------
+# TCP SMTP command: send command, check response code
+# ------------------------------------------------------------------
+
+_abf_smtp_tcp_cmd() {
     local fd="$1"
     local cmd="$2"
+    local expected_code="${3:-}"
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp >> ${cmd}" >&2
+
+    # Skip empty commands
+    if [[ -z "$cmd" ]]; then
+        return 0
+    fi
+
     echo "$cmd" >&"$fd"
-    read -r response <&"$fd" 2>/dev/null || true
+
+    # Read multi-line response (lines ending with - continue, space terminates)
+    local response=""
+    local line=""
+    while IFS= read -r line <&"$fd"; do
+        line=$(echo "$line" | tr -d '\r')
+        response="$line"
+        # Last line of multi-line response is "code SP message" (no hyphen after code)
+        if [[ "$line" =~ ^[0-9]{3}\  ]]; then
+            break
+        fi
+    done 2>/dev/null || true
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp << ${response}" >&2
+
+    if [[ -z "$expected_code" ]]; then
+        return 0
+    fi
+
+    local code="${response:0:3}"
+    if [[ "$code" == "$expected_code" ]]; then
+        return 0
+    fi
+
+    [[ "${ABF_SMTP_VERBOSE:-}" == "true" ]] && echo "  tcp: expected ${expected_code}, got ${code}" >&2
+    return 1
 }
 
 # ------------------------------------------------------------------

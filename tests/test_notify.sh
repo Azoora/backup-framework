@@ -371,6 +371,181 @@ test_test_email_no_to_reason() {
     assert_contains "$output" "Recipient email" "Shows recipient reason"
 }
 
+test_mime_message_has_date_header() {
+    _abf_notify_setup
+
+    local msg
+    msg=$(_abf_build_mime_message "Test Subject" "Test Body" "test-svc")
+    assert_contains "$msg" "Date:" "MIME message contains Date header"
+}
+
+test_mime_message_has_crlf() {
+    _abf_notify_setup
+
+    local msg
+    msg=$(_abf_build_mime_message "Test" "Body" "svc")
+    # The MIME message uses literal \r\n (4 chars) which printf converts to CRLF
+    assert_contains "$msg" '\r\n' "MIME message uses CRLF line endings"
+}
+
+test_mime_message_has_mime_version() {
+    _abf_notify_setup
+
+    local msg
+    msg=$(_abf_build_mime_message "Test" "Body" "svc")
+    assert_contains "$msg" "MIME-Version: 1.0" "MIME message has MIME-Version header"
+}
+
+test_mime_message_has_from() {
+    _abf_notify_setup
+
+    SMTP_FROM_NAME="Test Sender"
+    SMTP_FROM="test@example.com"
+
+    local msg
+    msg=$(_abf_build_mime_message "Test" "Body" "svc")
+    assert_contains "$msg" "From: Test Sender <test@example.com>" "MIME message has From header"
+}
+
+test_mime_message_has_to() {
+    _abf_notify_setup
+
+    SMTP_TO="admin@example.com"
+    local msg
+    msg=$(_abf_build_mime_message "Test" "Body" "svc")
+    assert_contains "$msg" "To: admin@example.com" "MIME message has To header"
+}
+
+test_mime_message_has_subject() {
+    _abf_notify_setup
+
+    local msg
+    msg=$(_abf_build_mime_message "Test Subject Line" "Body" "svc")
+    assert_contains "$msg" "Subject: Test Subject Line" "MIME message has Subject header"
+}
+
+test_mime_message_multipart_with_log() {
+    _abf_notify_setup
+
+    local tmpfile
+    tmpfile=$(mktemp -t "abf-test-log-XXXXXX")
+    echo "log content" > "$tmpfile"
+    ABF_LOG_FILE="$tmpfile"
+    SMTP_LOG_ATTACH_MAX_KB="64"
+
+    local msg
+    msg=$(_abf_build_mime_message "Test" "Body" "svc")
+
+    assert_contains "$msg" "multipart/mixed" "MIME is multipart with log"
+    assert_contains "$msg" "Content-Disposition: attachment" "MIME has attachment header"
+    assert_contains "$msg" "$(printf '%s' "log content" | base64 -w0)" "MIME includes base64 log"
+
+    rm -f "$tmpfile"
+}
+
+# ------------------------------------------------------------------
+# SMTP response parser tests
+# ------------------------------------------------------------------
+
+test_smtp_response_accepts_250() {
+    _abf_notify_setup
+
+    local response="220 smtp.example.com ESMTP
+250-localhost
+250-AUTH LOGIN PLAIN
+250 OK
+334 VXNlcm5hbWU6
+334 UGFzc3dvcmQ6
+235 Authentication successful
+250 Sender OK
+250 Recipient OK
+354 Enter message, ending with \".\" on a line by itself
+250 OK: Message accepted
+221 Bye"
+
+    _abf_smtp_response_has_code "$response" "250" "after data"
+    assert_eq "0" "$?" "Response parser accepts 250 after data"
+}
+
+test_smtp_response_rejects_550() {
+    _abf_notify_setup
+
+    local response="220 smtp.example.com ESMTP
+250-localhost
+250-AUTH LOGIN PLAIN
+250 OK
+334 VXNlcm5hbWU6
+334 UGFzc3dvcmQ6
+235 Authentication successful
+250 Sender OK
+250 Recipient OK
+354 Enter message
+550 5.1.1 Recipient rejected
+221 Bye"
+
+    local rc=0
+    _abf_smtp_response_has_code "$response" "250" "after data" || rc=$?
+    assert_eq "1" "$rc" "Response parser rejects 550 after data"
+}
+
+test_smtp_response_no_data_line() {
+    _abf_notify_setup
+
+    local response="220 smtp.example.com ESMTP
+250-localhost
+250 OK
+221 Bye"
+
+    local rc=0
+    _abf_smtp_response_has_code "$response" "250" "after data" || rc=$?
+    assert_eq "1" "$rc" "Response parser returns 1 when no DATA sent"
+}
+
+test_smtp_response_handles_openssl_noise() {
+    _abf_notify_setup
+
+    local response="depth=0 C=US, O=Example
+verify error:num=20
+DONE
+250-localhost
+250-AUTH LOGIN PLAIN
+250 OK
+354 Enter message
+250 OK: Message accepted
+221 Bye"
+
+    _abf_smtp_response_has_code "$response" "250" "after data"
+    assert_eq "0" "$?" "Response parser handles openssl noise lines"
+}
+
+# ------------------------------------------------------------------
+# TCP backend tests
+# ------------------------------------------------------------------
+
+test_tcp_skips_when_tls_enabled() {
+    _abf_notify_setup
+
+    SMTP_HOST="smtp.example.com"
+    SMTP_PORT="587"
+    SMTP_TLS="true"
+
+    local rc=0
+    _abf_sendmail_tcp "subject" "body" "service" || rc=$?
+    assert_eq "1" "$rc" "TCP backend returns 1 when TLS is enabled"
+}
+
+test_tcp_skips_when_tls_on_port_465() {
+    _abf_notify_setup
+
+    SMTP_HOST="smtp.example.com"
+    SMTP_PORT="465"
+    SMTP_TLS="true"
+
+    local rc=0
+    _abf_sendmail_tcp "subject" "body" "service" || rc=$?
+    assert_eq "1" "$rc" "TCP backend returns 1 on port 465 with TLS"
+}
+
 test_notify_send_test_email_structure() {
     _abf_notify_setup
 
