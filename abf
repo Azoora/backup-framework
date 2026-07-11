@@ -142,7 +142,7 @@ _abf_cmd_restore() {
     if [[ -z "$snapshot" ]] && [[ "$dry_run" != "true" ]]; then
         abf_load_service_config "$service_name"
         local repo
-        repo=$(_abf_get_storage_repo) || {
+        repo=$(_abf_get_storage_repo "$service_name") || {
             abf_log_error "No storage configured -- cannot determine latest snapshot"
             return "$ABF_EXIT_RESTORE_FAILED"
         }

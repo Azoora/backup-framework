@@ -24,7 +24,14 @@ storage_pre_upload() {
 }
 
 storage_get_repo_url() {
-    echo "rclone:${STORAGE_ONEDRIVE_REMOTE}:${STORAGE_ONEDRIVE_PATH}"
+    local service_name="${1:-}"
+    if [[ -n "$service_name" ]]; then
+        local display_name
+        display_name=$(_abf_service_display_name "$service_name")
+        echo "rclone:${STORAGE_ONEDRIVE_REMOTE}:Backups/$(hostname)/${display_name}"
+    else
+        echo "rclone:${STORAGE_ONEDRIVE_REMOTE}:${STORAGE_ONEDRIVE_PATH}"
+    fi
 }
 
 storage_list() {

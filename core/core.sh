@@ -421,7 +421,7 @@ abf_run_restore() {
         staging=$(mktemp -d -t "abf-restore-XXXXXX")
 
         abf_log_info "Decrypting backup..."
-        if abf_restic_init "$(_abf_get_storage_repo)"; then
+        if abf_restic_init "$(_abf_get_storage_repo "$service_name")"; then
             abf_restic_restore "$snapshot" "$staging" "$service_name" || {
                 rc="$ABF_EXIT_RESTORE_FAILED"
             }
@@ -471,7 +471,7 @@ abf_list_snapshots() {
     local service_name="${1:-}"
 
     local repo
-    repo=$(_abf_get_storage_repo 2>/dev/null) || {
+    repo=$(_abf_get_storage_repo "$service_name" 2>/dev/null) || {
         echo "No storage backend configured — no snapshots to list."
         return 0
     }
@@ -498,19 +498,25 @@ _abf_svc_var_prefix() {
     echo "SERVICE_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
 }
 
+_abf_service_display_name() {
+    local name="$1"
+    echo "${name^}"
+}
+
 _abf_get_storage_repo() {
+    local service_name="${1:-}"
     local backend="${ABF_STORAGE_BACKEND:-local}"
     abf_load_storage_module "$backend" 2>/dev/null || return 1
     abf_load_storage_config "$backend" 2>/dev/null
     # Redirect stdout to stderr so pre_upload log messages don't pollute the repo URL
     { _abf_call_optional storage_pre_upload; } 1>&2 || return 1
-    storage_get_repo_url 2>/dev/null || return 1
+    storage_get_repo_url "$service_name" 2>/dev/null || return 1
 }
 
 _abf_restic_backup_stage() {
     local service_name="$1"
     local repo
-    repo=$(_abf_get_storage_repo) || return "$ABF_EXIT_OK"  # no storage configured
+    repo=$(_abf_get_storage_repo "$service_name") || return "$ABF_EXIT_OK"  # no storage configured
 
     abf_restic_init "$repo" || return 1
     abf_restic_backup "$ABF_STAGING_DIR" "$service_name" || return 1
@@ -564,7 +570,7 @@ _abf_sync_destination() {
     abf_load_destination_config "$dest" 2>/dev/null
 
     local repo_url
-    repo_url=$(_abf_get_storage_repo 2>/dev/null) || {
+    repo_url=$(_abf_get_storage_repo "$service_name" 2>/dev/null) || {
         abf_log_warning "Destination '${dest}': no storage repo available — skipping"
         return 1
     }

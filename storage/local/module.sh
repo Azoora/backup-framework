@@ -31,7 +31,14 @@ storage_pre_upload() {
 }
 
 storage_get_repo_url() {
-    echo "${STORAGE_LOCAL_REPO_PATH}"
+    local service_name="${1:-}"
+    if [[ -n "$service_name" ]]; then
+        local display_name
+        display_name=$(_abf_service_display_name "$service_name")
+        echo "${STORAGE_LOCAL_REPO_PATH}/${display_name}"
+    else
+        echo "${STORAGE_LOCAL_REPO_PATH}"
+    fi
 }
 
 storage_list() {
