@@ -626,7 +626,7 @@ abf_schedule_global_status() {
     calendar=$(systemctl show -p OnCalendar "${unit_name}.timer" 2>/dev/null \
         | sed 's/OnCalendar=//' || echo "unknown")
 
-    local description
+    local description=""
     local time_part="00:00"
     if [[ "$calendar" =~ ^\*-\*-\*\ ([0-9]{2}):([0-9]{2}):00$ ]]; then
         time_part="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"

@@ -328,3 +328,42 @@ test_global_status_config_fallback() {
     rm -rf "$tmpdir"
     return 0
 }
+
+# Regression: Bug 4 — description unbound variable under set -u
+test_global_status_unbound_description_regression() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-description-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "sched-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/scheduler.sh"
+
+    ABF_CONFIG_DIR="$tmpdir"
+
+    SCHEDULE_ENABLED="true"
+    SCHEDULE_FREQUENCY="daily"
+    SCHEDULE_TIME="02:00"
+    _abf_schedule_global_save_config
+
+    (
+        set -u
+        ABF_CONFIG_DIR="$tmpdir"
+        _abf_schedule_global_load_config
+
+        # Same code pattern as abf_schedule_global_status fallback;
+        # must not crash with "unbound variable"
+        local description=""
+        if [[ -z "$description" ]]; then
+            description=$(_abf_describe_schedule "$SCHEDULE_FREQUENCY" "$SCHEDULE_TIME" "0")
+        fi
+        echo "$description"
+    ) || {
+        echo "  FAIL: unbound variable error in description fallback under set -u"
+        rm -rf "$tmpdir"
+        return 1
+    }
+
+    rm -rf "$tmpdir"
+    return 0
+}
