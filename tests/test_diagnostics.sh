@@ -151,6 +151,11 @@ test_diag_backup_age_messages() {
 # ==================================================================
 
 test_diag_repository_accessible_with_snapshot() {
+    if ! command -v restic &>/dev/null; then
+        echo "  SKIP: restic not installed"
+        return 0
+    fi
+
     local tmpdir
     tmpdir=$(mktemp -d -t "abf-test-diag-XXXXXX")
 
@@ -216,6 +221,11 @@ test_diag_repository_accessible_with_snapshot() {
 }
 
 test_diag_repository_unreadable_password_file() {
+    if ! command -v restic &>/dev/null; then
+        echo "  SKIP: restic not installed"
+        return 0
+    fi
+
     local tmpdir
     tmpdir=$(mktemp -d -t "abf-test-diag-XXXXXX")
 
