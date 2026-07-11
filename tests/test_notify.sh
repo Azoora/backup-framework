@@ -599,11 +599,14 @@ _abf_verbose_teardown() {
 test_verbose_dispatch_prints_backend_names() {
     _abf_verbose_setup
 
-    # Mock all backends to fail so we see all names
+    # Mock all backends to fail so we see all names.
+    # For the openssl backend (now FIFO-based), the mock must exit
+    # immediately so the FIFO reader gets EOF.
     cat > "${MOCK_BINDIR}/msmtp" <<'SCRIPT'
 #!/bin/bash
 exit 1
 SCRIPT
+    # Openssl mock: exit immediately — FIFO writer closes, reader gets EOF
     cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
 #!/bin/bash
 exit 1
@@ -672,35 +675,53 @@ SCRIPT
 test_verbose_openssl_shows_conversation_and_response() {
     _abf_verbose_setup
 
+    # Interactive openssl mock: reads commands, responds like real SMTP server
     cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
 #!/bin/bash
-# Simulate a full SMTP conversation response
-cat <<'RESP'
-220 smtp.test.com ESMTP
-250-localhost
-250-AUTH LOGIN PLAIN
-250 OK
-334 VXNlcm5hbWU6
-334 UGFzc3dvcmQ6
-235 Authentication successful
-250 Sender OK
-250 Recipient OK
-354 Enter message, ending with "." on a line by itself
-250 OK: Message accepted
-221 Bye
-RES
-exit 0
+echo "220 mock.smtp ESMTP ready"
+in_data=false
+auth_step=0
+while IFS= read -r line; do
+    line="${line%%$'\r'}"
+    if $in_data; then
+        if [ "$line" = "." ]; then
+            echo "250 OK: Message accepted"
+            in_data=false
+        fi
+    else
+        case "$line" in
+            "EHLO"*) echo "250-localhost" ; echo "250 AUTH LOGIN PLAIN" ;;
+            "AUTH LOGIN") echo "334 VXNlcm5hbWU6" ; auth_step=1 ;;
+            "QUIT") echo "221 Bye" ; exit 0 ;;
+            "DATA") echo "354 End data with <CRLF>.<CRLF>" ; in_data=true ;;
+            "MAIL FROM"*) echo "250 Sender OK" ;;
+            "RCPT TO"*) echo "250 Recipient OK" ;;
+            *)
+                if [[ "$line" =~ ^[A-Za-z0-9+/=]{2,}$ ]]; then
+                    if [[ $auth_step -eq 1 ]]; then
+                        echo "334 UGFzc3dvcmQ6"
+                        auth_step=2
+                    else
+                        echo "235 Authentication successful"
+                        auth_step=0
+                    fi
+                fi
+                ;;
+        esac
+    fi
+done
 SCRIPT
     chmod +x "${MOCK_BINDIR}/openssl"
 
     local output
     output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
 
-    assert_contains "$output" "SMTP conversation to send" "openssl verbose shows conversation header"
-    assert_contains "$output" "EHLO localhost" "openssl verbose shows EHLO"
-    assert_contains "$output" "AUTH LOGIN" "openssl verbose shows AUTH"
-    assert_contains "$output" "MAIL FROM" "openssl verbose shows MAIL FROM"
-    assert_contains "$output" "RCPT TO" "openssl verbose shows RCPT TO"
+    assert_contains "$output" ">> EHLO localhost" "openssl verbose shows >> EHLO"
+    assert_contains "$output" ">> AUTH LOGIN" "openssl verbose shows >> AUTH LOGIN"
+    assert_contains "$output" ">> MAIL FROM" "openssl verbose shows >> MAIL FROM"
+    assert_contains "$output" ">> RCPT TO" "openssl verbose shows >> RCPT TO"
+    assert_contains "$output" "<< 220" "openssl verbose shows greeting"
+    assert_contains "$output" "<< 250-localhost" "openssl verbose shows EHLO response"
     assert_contains "$output" "message accepted (250)" "openssl verbose shows acceptance"
 
     _abf_verbose_teardown
@@ -709,26 +730,50 @@ SCRIPT
 test_verbose_openssl_masks_password() {
     _abf_verbose_setup
 
+    # Interactive mock that verifies the password line sent by the client
+    # is NOT printed raw in the verbose output
     cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
 #!/bin/bash
-cat <<'RESP'
-220 smtp.test.com ESMTP
-250-localhost
-235 Authentication successful
-250 Sender OK
-250 Recipient OK
-354 Enter message
-250 OK
-221 Bye
-RES
-exit 0
+echo "220 mock.smtp ESMTP ready"
+in_data=false
+auth_step=0
+while IFS= read -r line; do
+    line="${line%%$'\r'}"
+    if $in_data; then
+        if [ "$line" = "." ]; then
+            echo "250 OK: Message accepted"
+            in_data=false
+        fi
+    else
+        case "$line" in
+            "EHLO"*) echo "250-localhost" ; echo "250 AUTH LOGIN PLAIN" ;;
+            "AUTH LOGIN") echo "334 VXNlcm5hbWU6" ; auth_step=1 ;;
+            "QUIT") echo "221 Bye" ; exit 0 ;;
+            "DATA") echo "354 End data" ; in_data=true ;;
+            "MAIL FROM"*) echo "250 Sender OK" ;;
+            "RCPT TO"*) echo "250 Recipient OK" ;;
+            *)
+                if [[ "$line" =~ ^[A-Za-z0-9+/=]{2,}$ ]]; then
+                    if [[ $auth_step -eq 1 ]]; then
+                        echo "334 UGFzc3dvcmQ6"
+                        auth_step=2
+                    else
+                        echo "235 Authentication successful"
+                        auth_step=0
+                    fi
+                fi
+                ;;
+        esac
+    fi
+done
 SCRIPT
     chmod +x "${MOCK_BINDIR}/openssl"
 
     local output
     output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
 
-    # The password base64 should NOT appear raw — the masked line replaces it
+    # The password line is now shown as >> [base64 password masked]
+    # because the conversation display uses AUTH LOGIN state tracking
     assert_contains "$output" "password masked" "openssl verbose masks password"
 
     _abf_verbose_teardown
@@ -737,6 +782,7 @@ SCRIPT
 test_verbose_openssl_shows_connection_error() {
     _abf_verbose_setup
 
+    # Mock exits immediately (no greeting) — FIFO reader gets EOF
     cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
 #!/bin/bash
 echo "connect: Connection refused" >&2
@@ -747,7 +793,7 @@ SCRIPT
     local output
     output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
 
-    assert_contains "$output" "connection failed" "openssl verbose shows connection failed"
+    assert_contains "$output" "no SMTP greeting" "openssl verbose shows no greeting"
     assert_contains "$output" "Connection refused" "openssl verbose shows stderr error"
 
     _abf_verbose_teardown
@@ -756,31 +802,37 @@ SCRIPT
 test_verbose_openssl_shows_smtp_rejection() {
     _abf_verbose_setup
 
+    # Interactive mock that rejects password
     cat > "${MOCK_BINDIR}/openssl" <<'SCRIPT'
 #!/bin/bash
-cat <<'RESP'
-220 smtp.test.com ESMTP
-250-localhost
-250-AUTH LOGIN PLAIN
-250 OK
-334 VXNlcm5hbWU6
-334 UGFzc3dvcmQ6
-535 5.7.8 Authentication credentials invalid
-250 Sender OK
-250 Recipient OK
-354 Enter message
-550 5.1.1 Recipient rejected
-221 Bye
-RES
-exit 0
+echo "220 mock.smtp ESMTP ready"
+auth_step=0
+while IFS= read -r line; do
+    line="${line%%$'\r'}"
+    case "$line" in
+        "EHLO"*) echo "250-localhost" ; echo "250 AUTH LOGIN PLAIN" ;;
+        "AUTH LOGIN") echo "334 VXNlcm5hbWU6" ; auth_step=1 ;;
+        "QUIT") echo "221 Bye" ; exit 0 ;;
+        *)
+            if [[ "$line" =~ ^[A-Za-z0-9+/=]{2,}$ ]]; then
+                if [[ $auth_step -eq 1 ]]; then
+                    echo "334 UGFzc3dvcmQ6"
+                    auth_step=2
+                else
+                    echo "535 5.7.8 Authentication credentials invalid"
+                fi
+            fi
+            ;;
+    esac
+done
 SCRIPT
     chmod +x "${MOCK_BINDIR}/openssl"
 
     local output
     output=$(_abf_sendmail_openssl "Test" "Body" "svc" 2>&1 || true)
 
-    assert_contains "$output" "SMTP rejected" "openssl verbose shows rejection"
-    assert_contains "$output" "550" "openssl verbose includes error code"
+    assert_contains "$output" "password rejected" "openssl verbose shows password rejection"
+    assert_contains "$output" "535" "openssl verbose includes error code"
 
     _abf_verbose_teardown
 }
