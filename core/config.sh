@@ -84,7 +84,14 @@ abf_load_destination_config() {
 _abf_source_if_exists() {
     local path="$1"
     if [[ -f "$path" ]]; then
+        if [[ ! -r "$path" ]]; then
+            echo "[WARN] Cannot read ${path} - run with sudo if needed" >&2
+            return 0
+        fi
         # shellcheck source=/dev/null
-        source "$path"
+        source "$path" 2>/dev/null || {
+            echo "[WARN] Error loading ${path}" >&2
+            return 0
+        }
     fi
 }

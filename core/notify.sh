@@ -102,7 +102,24 @@ EOF
 )
 
     local subject="[Backup Framework] TEST - SMTP configuration test - ${hostname}"
-    _abf_sendmail "$subject" "$body" "$service"
+    if _abf_sendmail "$subject" "$body" "$service"; then
+        echo "  ✓ Test email sent successfully"
+        return 0
+    else
+        local reason=""
+        if [[ -z "${SMTP_HOST:-}" ]]; then
+            reason="SMTP host is not configured"
+        elif [[ -z "${SMTP_FROM:-}" ]]; then
+            reason="From email is not configured"
+        elif [[ -z "${SMTP_TO:-}" ]]; then
+            reason="Recipient email is not configured"
+        else
+            reason="Check SMTP settings or network connectivity"
+        fi
+        echo "  ✗ Test email failed" >&2
+        echo "    ${reason}" >&2
+        return 1
+    fi
 }
 
 # ------------------------------------------------------------------
@@ -435,6 +452,9 @@ abf_config_wizard_smtp() {
     echo "  SMTP to:             ${SMTP_TO}"
     echo ""
 
+    # Enable notifications since the user completed the wizard
+    SMTP_ENABLED="true"
+
     local existing_values=""
     if [[ -f "$config_file" ]]; then
         existing_values=$(cat "$config_file")
@@ -463,7 +483,6 @@ abf_config_wizard_smtp() {
     local send_test
     read -r send_test
     if [[ "$send_test" == "y" ]] || [[ "$send_test" == "Y" ]]; then
-        SMTP_ENABLED="true"
         abf_notify_send_test
     fi
 

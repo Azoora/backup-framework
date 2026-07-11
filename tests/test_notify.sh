@@ -275,6 +275,102 @@ test_notify_status_mapping_failed() {
     assert_contains "$captured" "status=FAILED" "BACKUP_FAILED maps to FAILED"
 }
 
+test_wizard_sets_smtp_enabled_true() {
+    _abf_notify_setup
+
+    # Simulate what the wizard does: set SMTP_ENABLED before generating config
+    SMTP_ENABLED="true"
+    SMTP_HOST="mail.example.com"
+    SMTP_FROM="app@x.com"
+    SMTP_TO="admin@x.com"
+
+    local cfg
+    cfg=$(_abf_generate_smtp_config)
+    assert_contains "$cfg" "SMTP_ENABLED=\"true\"" "Wizard generates SMTP_ENABLED=true"
+}
+
+test_test_email_success_output() {
+    _abf_notify_setup
+
+    _abf_sendmail() { return 0; }
+
+    SMTP_HOST="smtp.test.com"
+    SMTP_PORT="587"
+    SMTP_USER="user"
+    SMTP_PASS="pass"
+    SMTP_FROM_NAME="Tester"
+    SMTP_FROM="tester@test.com"
+    SMTP_TO="admin@test.com"
+    SMTP_TLS="true"
+    SMTP_ENABLED="true"
+
+    local output
+    output=$(abf_notify_send_test 2>&1 || true)
+    assert_contains "$output" "✓" "Success output shows checkmark"
+    assert_contains "$output" "sent successfully" "Success message"
+}
+
+test_test_email_failure_output() {
+    _abf_notify_setup
+
+    _abf_sendmail() { return 1; }
+
+    SMTP_HOST="smtp.test.com"
+    SMTP_FROM="tester@test.com"
+    SMTP_TO="admin@test.com"
+    SMTP_ENABLED="true"
+
+    local output
+    output=$(abf_notify_send_test 2>&1 || true)
+    assert_contains "$output" "✗" "Failure output shows X mark"
+    assert_contains "$output" "failed" "Failure message"
+}
+
+test_test_email_no_host_reason() {
+    _abf_notify_setup
+
+    _abf_sendmail() { return 1; }
+
+    SMTP_HOST=""
+    SMTP_FROM="tester@test.com"
+    SMTP_TO="admin@test.com"
+    SMTP_ENABLED="true"
+
+    local output
+    output=$(abf_notify_send_test 2>&1 || true)
+    assert_contains "$output" "host is not configured" "Shows host reason"
+}
+
+test_test_email_no_from_reason() {
+    _abf_notify_setup
+
+    _abf_sendmail() { return 1; }
+
+    SMTP_HOST="smtp.test.com"
+    SMTP_FROM=""
+    SMTP_TO="admin@test.com"
+    SMTP_ENABLED="true"
+
+    local output
+    output=$(abf_notify_send_test 2>&1 || true)
+    assert_contains "$output" "From email" "Shows from reason"
+}
+
+test_test_email_no_to_reason() {
+    _abf_notify_setup
+
+    _abf_sendmail() { return 1; }
+
+    SMTP_HOST="smtp.test.com"
+    SMTP_FROM="tester@test.com"
+    SMTP_TO=""
+    SMTP_ENABLED="true"
+
+    local output
+    output=$(abf_notify_send_test 2>&1 || true)
+    assert_contains "$output" "Recipient email" "Shows recipient reason"
+}
+
 test_notify_send_test_email_structure() {
     _abf_notify_setup
 

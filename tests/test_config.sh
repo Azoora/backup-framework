@@ -196,6 +196,42 @@ test_default_paths_are_user_writable() {
     return 0
 }
 
+test_source_if_exists_missing_file() {
+    source "${ABF_ROOT}/core/config.sh"
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-cfg-XXXXXX")
+
+    # Should not error on missing file
+    _abf_source_if_exists "${tmpdir}/nonexistent.conf"
+    assert_eq "0" "$?" "Missing file returns 0"
+    rm -rf "$tmpdir"
+}
+
+test_source_if_exists_unreadable_file() {
+    source "${ABF_ROOT}/core/config.sh"
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-cfg-XXXXXX")
+
+    echo 'TEST_VAR="secret"' > "${tmpdir}/restricted.conf"
+    chmod 000 "${tmpdir}/restricted.conf"
+
+    # Must not print raw bash error; must return 0 gracefully
+    local output
+    output=$(_abf_source_if_exists "${tmpdir}/restricted.conf" 2>&1 || true)
+    assert_contains "$output" "Cannot read" "Prints friendly message instead of raw error"
+    assert_contains "$output" "sudo" "Suggests sudo"
+    # Verify no raw bash error
+    if echo "$output" | grep -qi "Permission denied"; then
+        echo "  FAIL: Raw 'Permission denied' leaked to user"
+        chmod 600 "${tmpdir}/restricted.conf"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    chmod 600 "${tmpdir}/restricted.conf"
+    rm -rf "$tmpdir"
+}
+
 test_validate_config_with_warnings() {
     source "${ABF_ROOT}/core/exit_codes.sh"
     source "${ABF_ROOT}/core/config.sh"
