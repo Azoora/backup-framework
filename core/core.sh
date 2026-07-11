@@ -503,13 +503,24 @@ _abf_service_display_name() {
     echo "${name^}"
 }
 
+_abf_hostname_display() {
+    local host name result=""
+    host=$(hostname)
+    host=$(echo "$host" | tr '[:upper:]' '[:lower:]')
+    IFS='-_' read -ra parts <<< "$host"
+    for name in "${parts[@]}"; do
+        result+="${name^}"
+    done
+    echo "$result"
+}
+
 _abf_get_storage_repo() {
     local service_name="${1:-}"
     local backend="${ABF_STORAGE_BACKEND:-local}"
     abf_load_storage_module "$backend" 2>/dev/null || return 1
     abf_load_storage_config "$backend" 2>/dev/null
     # Redirect stdout to stderr so pre_upload log messages don't pollute the repo URL
-    { _abf_call_optional storage_pre_upload; } 1>&2 || return 1
+    { _abf_call_optional storage_pre_upload "$service_name"; } 1>&2 || return 1
     storage_get_repo_url "$service_name" 2>/dev/null || return 1
 }
 

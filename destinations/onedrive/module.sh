@@ -49,7 +49,7 @@ destination_sync() {
     if [[ -n "$service_name" ]]; then
         local display_name
         display_name=$(_abf_service_display_name "$service_name")
-        dest_path="Backups/$(hostname)/${display_name}"
+        dest_path="Backups/$(_abf_hostname_display)/${display_name}"
     else
         dest_path="${ONEDRIVE_PATH}"
     fi

@@ -28,7 +28,7 @@ storage_get_repo_url() {
     if [[ -n "$service_name" ]]; then
         local display_name
         display_name=$(_abf_service_display_name "$service_name")
-        echo "rclone:${STORAGE_ONEDRIVE_REMOTE}:Backups/$(hostname)/${display_name}"
+        echo "rclone:${STORAGE_ONEDRIVE_REMOTE}:Backups/$(_abf_hostname_display)/${display_name}"
     else
         echo "rclone:${STORAGE_ONEDRIVE_REMOTE}:${STORAGE_ONEDRIVE_PATH}"
     fi

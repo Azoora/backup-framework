@@ -10,6 +10,7 @@
 STORAGE_LOCAL_REPO_PATH="${STORAGE_LOCAL_REPO_PATH:-/tmp/abf/restic}"
 
 storage_pre_upload() {
+    local service_name="${1:-}"
     local dir
     dir=$(dirname "$STORAGE_LOCAL_REPO_PATH")
 
@@ -26,7 +27,13 @@ storage_pre_upload() {
         return 1
     fi
 
-    abf_log_info "Local: repository path ${STORAGE_LOCAL_REPO_PATH}"
+    if [[ -n "$service_name" ]]; then
+        local display_name
+        display_name=$(_abf_service_display_name "$service_name")
+        abf_log_info "Local: repository path ${STORAGE_LOCAL_REPO_PATH}/${display_name}"
+    else
+        abf_log_info "Local: repository path ${STORAGE_LOCAL_REPO_PATH}"
+    fi
     return 0
 }
 
