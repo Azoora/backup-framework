@@ -34,6 +34,8 @@ source "${ABF_ROOT}/core/retention.sh"
 source "${ABF_ROOT}/core/lock.sh"
 # shellcheck source=core/scheduler.sh
 source "${ABF_ROOT}/core/scheduler.sh"
+# shellcheck source=core/status.sh
+source "${ABF_ROOT}/core/status.sh"
 # shellcheck source=core/diagnostics.sh
 source "${ABF_ROOT}/core/diagnostics.sh"
 # shellcheck source=core/migrate.sh
@@ -65,11 +67,15 @@ Commands:
   notify test              Send a test email to verify SMTP settings
   destination check        Validate configured destinations
   doctor [--json]          Run comprehensive health diagnostics
+  status [--short|--json]  System health overview
+  schedule enable          Enable the global backup schedule
+  schedule disable         Disable the global backup schedule
+  schedule status [<svc>]  Show schedule status (global or per-service)
+  schedule daily HH:MM     Configure daily backup at given time
   schedule install <svc>   Schedule recurring backups
-                             [--frequency daily|weekly|monthly|<cron>]
-                             [--at HH:MM] [--on-day DAY] [--force]
+                              [--frequency daily|weekly|monthly|<cron>]
+                              [--at HH:MM] [--on-day DAY] [--force]
   schedule remove <svc>    Remove a scheduled backup
-  schedule status <svc>    Show schedule status for a service
   schedule list            List all scheduled backups
 
 Options:
@@ -341,10 +347,42 @@ _abf_main() {
             fi
             abf_notify_send_test
             ;;
+        status)
+            local json_mode="false"
+            local short_mode="false"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --json)  json_mode="true"; shift ;;
+                    --short) short_mode="true"; shift ;;
+                    *)       shift ;;
+                esac
+            done
+            if [[ "$json_mode" == "true" ]]; then
+                abf_status_run "json"
+            elif [[ "$short_mode" == "true" ]]; then
+                abf_status_run "short"
+            else
+                abf_status_run "human"
+            fi
+            ;;
         schedule)
             local subcommand="${1:-}"
 
             case "$subcommand" in
+                enable)
+                    _abf_schedule_global_load_config
+                    abf_schedule_global_enable "$SCHEDULE_FREQUENCY" "$SCHEDULE_TIME"
+                    ;;
+                disable)
+                    abf_schedule_global_disable
+                    ;;
+                daily)
+                    if [[ $# -lt 2 ]]; then
+                        echo "Usage: abf schedule daily HH:MM" >&2
+                        exit 1
+                    fi
+                    abf_schedule_global_enable "daily" "$2"
+                    ;;
                 install)
                     if [[ $# -lt 2 ]]; then
                         echo "Usage: abf schedule install <service> [options]" >&2
@@ -376,17 +414,17 @@ _abf_main() {
                     abf_schedule_remove "$2"
                     ;;
                 status)
-                    if [[ $# -lt 2 ]]; then
-                        echo "Usage: abf schedule status <service>" >&2
-                        exit 1
+                    if [[ $# -ge 2 ]]; then
+                        abf_schedule_status "$2"
+                    else
+                        abf_schedule_global_status
                     fi
-                    abf_schedule_status "$2"
                     ;;
                 list)
                     abf_schedule_list
                     ;;
                 *)
-                    echo "Usage: abf schedule install|remove|status|list" >&2
+                    echo "Usage: abf schedule enable|disable|status|daily|install|remove|list" >&2
                     exit 1
                     ;;
             esac

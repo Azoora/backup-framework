@@ -147,3 +147,111 @@ test_cron_install_remove_list_status() {
 
     return 0
 }
+
+test_global_config_file_path() {
+    source "${ABF_ROOT}/core/scheduler.sh"
+    ABF_CONFIG_DIR="/tmp/abf-test-config"
+    local path
+    path=$(_abf_schedule_global_config_file)
+    assert_eq "/tmp/abf-test-config/schedule.conf" "$path" "Global config file path"
+}
+
+test_global_config_save_and_load() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-global-sched-XXXXXX")
+
+    source "${ABF_ROOT}/core/scheduler.sh"
+    ABF_CONFIG_DIR="$tmpdir"
+
+    SCHEDULE_ENABLED="true"
+    SCHEDULE_FREQUENCY="daily"
+    SCHEDULE_TIME="03:00"
+    _abf_schedule_global_save_config
+
+    SCHEDULE_ENABLED="false"
+    SCHEDULE_FREQUENCY=""
+    SCHEDULE_TIME=""
+
+    _abf_schedule_global_load_config
+
+    assert_eq "true" "$SCHEDULE_ENABLED" "Global config loads enabled"
+    assert_eq "daily" "$SCHEDULE_FREQUENCY" "Global config loads frequency"
+    assert_eq "03:00" "$SCHEDULE_TIME" "Global config loads time"
+
+    rm -rf "$tmpdir"
+    return 0
+}
+
+test_global_config_defaults_when_missing() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-global-sched-XXXXXX")
+
+    source "${ABF_ROOT}/core/scheduler.sh"
+    ABF_CONFIG_DIR="$tmpdir"
+
+    SCHEDULE_ENABLED=""
+    SCHEDULE_FREQUENCY=""
+    SCHEDULE_TIME=""
+    _abf_schedule_global_load_config
+
+    assert_eq "false" "$SCHEDULE_ENABLED" "Default enabled is false"
+    assert_eq "daily" "$SCHEDULE_FREQUENCY" "Default frequency is daily"
+    assert_eq "03:00" "$SCHEDULE_TIME" "Default time is 03:00"
+
+    rm -rf "$tmpdir"
+    return 0
+}
+
+test_global_build_services_exec() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-global-sched-XXXXXX")
+
+    # Create a minimal manifest
+    mkdir -p "${tmpdir}/services"
+    printf 'vaultwarden\nimmich\n' > "${tmpdir}/services/manifest.conf"
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "sched-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/scheduler.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    # Override _abf_manifest_lines to use our test manifest
+    _abf_manifest_lines() {
+        printf 'vaultwarden\nimmich\n'
+    }
+
+    local exec_lines
+    exec_lines=$(_abf_schedule_global_build_services_exec "/usr/local/bin/abf" " --config /etc/abf")
+
+    assert_contains "$exec_lines" "ExecStart=/usr/local/bin/abf backup vaultwarden --config /etc/abf" "Builds vaultwarden exec"
+    assert_contains "$exec_lines" "ExecStart=/usr/local/bin/abf backup immich --config /etc/abf" "Builds immich exec"
+
+    rm -rf "$tmpdir"
+    return 0
+}
+
+test_global_build_services_exec_no_config() {
+    local tmpdir
+    tmpdir=$(mktemp -d -t "abf-test-global-sched-XXXXXX")
+
+    source "${ABF_ROOT}/core/exit_codes.sh"
+    source "${ABF_ROOT}/core/log.sh"
+    abf_init_logging "sched-test" "test" "${tmpdir}/logs"
+    source "${ABF_ROOT}/core/config.sh"
+    source "${ABF_ROOT}/core/scheduler.sh"
+    source "${ABF_ROOT}/core/core.sh"
+
+    _abf_manifest_lines() {
+        printf 'vaultwarden\n'
+    }
+
+    local exec_lines
+    exec_lines=$(_abf_schedule_global_build_services_exec "/usr/local/bin/abf" "")
+
+    assert_contains "$exec_lines" "ExecStart=/usr/local/bin/abf backup vaultwarden" "Builds exec without config arg"
+
+    rm -rf "$tmpdir"
+    return 0
+}

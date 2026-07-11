@@ -22,6 +22,7 @@ abf backup vaultwarden    →  staged → restic encrypted → OneDrive
 - **Notifications** — SMTP email with four delivery fallbacks (mail, sendmail, msmtp, bash TCP). Subject includes status (SUCCESS/WARNING/FAILED), service name, snapshot ID, start/end time, duration, repo verification result, destination results, and attaches the backup log (up to configurable size limit).
 - **Retention** — Policy-driven snapshot pruning via `restic forget` (daily/weekly/monthly)
 - **Diagnostics** — `abf doctor` with 13 health checks, JSON mode for monitoring
+- **System Status** — `abf status` with human, short, and JSON output modes
 - **Dual-output logging** — Human-readable `.log` + machine-readable `.jsonl`
 - **Safe restore** — Dry-run mode, 5-second abort window, staging directory isolation
 
@@ -40,8 +41,9 @@ abf                    CLI entry point
 │   ├── notify.sh      SMTP notifications (4 delivery backends)
 │   ├── retention.sh   Retention policy passthrough
 │   ├── lock.sh        PID-based concurrency lock
-│   ├── scheduler.sh   Cron/systemd schedule management
-│   └── diagnostics.sh Health check subsystem (abf doctor)
+│   ├── scheduler.sh   Cron/systemd schedule management (global + per-service)
+│   ├── diagnostics.sh Health check subsystem (abf doctor)
+│   └── status.sh      System health overview (abf status)
 ├── services/          Service plugin modules
 │   ├── manifest.conf  Explicit service registry
 │   └── vaultwarden/   Vaultwarden lifecycle hooks
@@ -58,7 +60,7 @@ abf                    CLI entry point
 │   ├── storage.conf   Storage defaults
 │   ├── smtp.conf      SMTP notification settings (host, port, TLS, auth, from name/email, recipients, log attach)
 │   └── services/      Per-service overrides
-├── tests/             Automated test suite (54 tests)
+├── tests/             Automated test suite (220+ tests)
 ├── scripts/           install.sh, test.sh
 ├── examples/          cron + systemd timer examples
 ├── cache/             Runtime cache
@@ -245,7 +247,16 @@ abf restore vaultwarden                    # restore latest snapshot
 abf restore vaultwarden --snapshot a1b2c3  # restore specific snapshot
 ```
 
-### Schedule
+### Global Schedule
+
+```bash
+abf schedule enable               # enable with saved/default schedule
+abf schedule disable              # disable the global schedule
+abf schedule daily 03:00          # configure and enable daily backup at 03:00
+abf schedule status               # show global schedule status
+```
+
+### Per-Service Schedule
 
 ```bash
 abf schedule install vaultwarden \
@@ -257,9 +268,17 @@ abf schedule install vaultwarden \
   --at 02:00 \
   --on-day 0
 
-abf schedule status vaultwarden
-abf schedule list
+abf schedule status vaultwarden   # status for a specific service
+abf schedule list                 # list all scheduled backups
 abf schedule remove vaultwarden
+```
+
+### System Status
+
+```bash
+abf status              # comprehensive health overview (human-readable)
+abf status --short      # concise summary (for voice assistants / Apple Shortcuts)
+abf status --json       # structured JSON (for Home Assistant, n8n, dashboards)
 ```
 
 ### Diagnostics
@@ -337,13 +356,74 @@ Configure via `BACKUP_DESTINATIONS="local,onedrive"` in `abf.conf`. Each destina
 
 ## Scheduling
 
-The framework auto-detects the available scheduling system (systemd preferred, cron fallback).
+The framework provides two scheduling modes:
+
+### Global Schedule (Recommended)
+
+A single systemd timer (`abf-backup.timer`) runs backups for **all services** in the manifest.  
+Configured via:
+
+```bash
+abf schedule daily 03:00    # set daily backup at 3 AM
+abf schedule status         # view schedule, next/last run
+abf schedule disable        # stop scheduled backups
+```
+
+The timer is persisted across reboots. Re-running `abf schedule daily HH:MM` updates the existing schedule.  
+The schedule configuration is saved to `$ABF_CONFIG_DIR/schedule.conf`.
+
+### Per-Service Schedule (Legacy)
+
+The framework also auto-detects the available scheduling system (systemd preferred, cron fallback) for individual services.
 
 **systemd timer** — Units named `abf-backup-<service>.service` and `.timer` are created in `/etc/systemd/system/`.
 
 **cron** — A line is added to the user's crontab with `# abf-schedule:<service>` annotation.
 
 Both backends support `--frequency daily|weekly|monthly|<cron-expr>`.
+
+---
+
+## System Status
+
+The `abf status` command provides a complete health overview of the backup appliance:
+
+```
+Backup Framework v0.1.1-beta
+
+Overall Health
+--------------
+HEALTHY
+
+Services
+--------
+Vaultwarden
+  Last Backup : Today 03:00
+  Status      : SUCCESS
+  Repository  : Healthy
+
+Immich
+  Status      : Disabled
+
+Scheduler
+---------
+Enabled   : Yes
+Next Run  : Tomorrow 03:00
+
+Storage
+-------
+Local Repository : OK
+
+Notifications
+-------------
+SMTP       : OK
+Last Email : Delivered
+```
+
+Three output formats:
+- **Default**: Formatted table view with sections for health, services, scheduler, storage, and notifications
+- `--short`: Concise one-liners for voice assistants and Apple Shortcuts
+- `--json`: Structured JSON for Home Assistant, n8n, and dashboards
 
 ---
 
@@ -361,8 +441,9 @@ core/                      Engine modules
   notify.sh                SMTP notifications
   retention.sh             Retention policy
   lock.sh                  Backup locking
-  scheduler.sh             Schedule management
+  scheduler.sh             Schedule management (global + per-service)
   diagnostics.sh           Health diagnostics
+  status.sh                System health overview
 services/                  Service plugin modules
   manifest.conf            Service registry
   vaultwarden/             Vaultwarden lifecycle hooks
@@ -378,7 +459,7 @@ config/                    Default configuration
   storage.conf             Storage defaults
   smtp.conf                SMTP settings
   services/                Service overrides
-tests/                     Test suite (54 tests)
+tests/                     Test suite (220+ tests)
 scripts/                   install.sh, test.sh
 cache/                     Runtime cache
 logs/                      Runtime logs
